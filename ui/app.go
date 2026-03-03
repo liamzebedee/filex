@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"github.com/gotk3/gotk3/gtk"
+
+	"filex/i18n"
 )
 
 // App holds the global application state.
@@ -32,7 +34,7 @@ func (a *App) buildWindow() {
 	if err != nil {
 		log.Fatal("Failed to create window:", err)
 	}
-	a.Window.SetTitle("Files")
+	a.Window.SetTitle(i18n.T("Files"))
 	a.Window.SetDefaultSize(900, 600)
 	a.Window.Connect("destroy", func() {
 		gtk.MainQuit()

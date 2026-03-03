@@ -6,12 +6,14 @@ import (
 
 	"github.com/gotk3/gotk3/gtk"
 	"golang.org/x/sys/unix"
+
+	"filex/i18n"
 )
 
 // Statusbar shows item count and free disk space.
 type Statusbar struct {
-	Box       *gtk.Box
-	ItemLabel *gtk.Label
+	Box        *gtk.Box
+	ItemLabel  *gtk.Label
 	SpaceLabel *gtk.Label
 }
 
@@ -44,16 +46,16 @@ func (sb *Statusbar) Update(tab *Tab) {
 	}
 	count := len(tab.FileView.Entries)
 	if count == 1 {
-		sb.ItemLabel.SetText("1 item")
+		sb.ItemLabel.SetText(i18n.T("1 item"))
 	} else {
-		sb.ItemLabel.SetText(fmt.Sprintf("%d items", count))
+		sb.ItemLabel.SetText(i18n.T("%d items", count))
 	}
 
 	// Free space
 	var stat unix.Statfs_t
 	if err := unix.Statfs(tab.Path, &stat); err == nil {
 		free := stat.Bavail * uint64(stat.Bsize)
-		sb.SpaceLabel.SetText(fmt.Sprintf("Free space: %s", formatBytes(free)))
+		sb.SpaceLabel.SetText(i18n.T("Free space: %s", formatBytes(free)))
 	} else {
 		sb.SpaceLabel.SetText("")
 	}

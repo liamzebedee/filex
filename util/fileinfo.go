@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"filex/i18n"
 )
 
 // FormatSize returns a human-readable file size string.
@@ -29,10 +31,19 @@ func FormatSize(size int64) string {
 func FormatDate(t time.Time) string {
 	now := time.Now()
 	if t.Year() == now.Year() && t.YearDay() == now.YearDay() {
+		if i18n.IsChinese() {
+			return fmt.Sprintf("%s %s", i18n.T("TodayPrefix"), t.Format("15:04"))
+		}
 		return t.Format("Today 15:04")
 	}
 	if t.Year() == now.Year() {
+		if i18n.IsChinese() {
+			return t.Format(i18n.T("Date.ThisYear"))
+		}
 		return t.Format("Jan 02 15:04")
+	}
+	if i18n.IsChinese() {
+		return t.Format(i18n.T("Date.PastYear"))
 	}
 	return t.Format("Jan 02 2006")
 }

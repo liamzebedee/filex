@@ -8,6 +8,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/bookmarks"
+	"filex/i18n"
 )
 
 // Sidebar shows the places panel with bookmarks.
@@ -73,7 +74,7 @@ func (s *Sidebar) Populate() {
 	})
 
 	// Add header
-	header, _ := gtk.LabelNew("Places")
+	header, _ := gtk.LabelNew(i18n.T("Places"))
 	headerSc, _ := header.GetStyleContext()
 	headerSc.AddClass("sidebar-header")
 	header.SetHAlign(gtk.ALIGN_START)
@@ -117,7 +118,7 @@ func (s *Sidebar) createBookmarkRow(bm bookmarks.Bookmark) *gtk.Box {
 func (s *Sidebar) showRemoveMenu(path string, event *gdk.EventButton) {
 	menu, _ := gtk.MenuNew()
 
-	removeItem, _ := gtk.MenuItemNewWithLabel("Remove Bookmark")
+	removeItem, _ := gtk.MenuItemNewWithLabel(i18n.T("Remove Bookmark"))
 	removeItem.Connect("activate", func() {
 		s.bookmarks.Remove(path)
 		s.Populate()

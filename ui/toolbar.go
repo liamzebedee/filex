@@ -10,6 +10,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/fileops"
+	"filex/i18n"
 )
 
 // Toolbar contains navigation buttons, breadcrumb/path bar, search, and view toggle.
@@ -43,8 +44,8 @@ func NewToolbar(app *App) *Toolbar {
 	sc.AddClass("toolbar-box")
 
 	// Back / Forward — compact nav buttons
-	tb.BackBtn = navButton("go-previous-symbolic", "Back")
-	tb.ForwardBtn = navButton("go-next-symbolic", "Forward")
+	tb.BackBtn = navButton("go-previous-symbolic", i18n.T("Back"))
+	tb.ForwardBtn = navButton("go-next-symbolic", i18n.T("Forward"))
 
 	tb.BackBtn.Connect("clicked", func() {
 		if tab := app.ActiveTab(); tab != nil {
@@ -127,7 +128,7 @@ func NewToolbar(app *App) *Toolbar {
 	tb.SearchEntry, _ = gtk.SearchEntryNew()
 	searchSc, _ := tb.SearchEntry.GetStyleContext()
 	searchSc.AddClass("search-entry")
-	tb.SearchEntry.SetPlaceholderText("Search…")
+	tb.SearchEntry.SetPlaceholderText(i18n.T("Search…"))
 	tb.SearchEntry.Connect("search-changed", func() {
 		query, _ := tb.SearchEntry.GetText()
 		if tab := app.ActiveTab(); tab != nil {
@@ -145,12 +146,12 @@ func NewToolbar(app *App) *Toolbar {
 	listImg, _ := gtk.ImageNewFromIconName("view-list-symbolic", gtk.ICON_SIZE_MENU)
 	tb.ListBtn.SetImage(listImg)
 	tb.ListBtn.SetActive(true)
-	tb.ListBtn.SetTooltipText("List view")
+	tb.ListBtn.SetTooltipText(i18n.T("List view"))
 
 	tb.IconBtn, _ = gtk.ToggleButtonNew()
 	iconImg, _ := gtk.ImageNewFromIconName("view-grid-symbolic", gtk.ICON_SIZE_MENU)
 	tb.IconBtn.SetImage(iconImg)
-	tb.IconBtn.SetTooltipText("Icon view")
+	tb.IconBtn.SetTooltipText(i18n.T("Icon view"))
 
 	tb.ListBtn.Connect("toggled", func() {
 		if tb.ListBtn.GetActive() {

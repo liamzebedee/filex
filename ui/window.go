@@ -4,6 +4,8 @@ import (
 	"log"
 
 	"github.com/gotk3/gotk3/gtk"
+
+	"filex/i18n"
 )
 
 // BuildWindow assembles the main layout:
@@ -21,7 +23,7 @@ func BuildWindow(app *App) {
 		log.Fatal(err)
 	}
 	headerBar.SetShowCloseButton(true)
-	headerBar.SetTitle("Files")
+	headerBar.SetTitle(i18n.T("Files"))
 	hsc, _ := headerBar.GetStyleContext()
 	hsc.AddClass("dark-headerbar")
 	app.Window.SetTitlebar(headerBar)
