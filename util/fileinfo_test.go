@@ -2,9 +2,15 @@ package util
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
 )
+
+func setEnglishLocale(t *testing.T) {
+	t.Helper()
+	t.Setenv("FILEX_LANG", "en")
+}
 
 func TestFormatSize(t *testing.T) {
 	tests := []struct {
@@ -31,6 +37,7 @@ func TestFormatSize(t *testing.T) {
 }
 
 func TestFormatDate_Today(t *testing.T) {
+	setEnglishLocale(t)
 	now := time.Now()
 	result := FormatDate(now)
 	if len(result) < 5 || result[:5] != "Today" {
@@ -39,6 +46,7 @@ func TestFormatDate_Today(t *testing.T) {
 }
 
 func TestFormatDate_ThisYear(t *testing.T) {
+	setEnglishLocale(t)
 	now := time.Now()
 	// Pick a date this year but not today
 	d := time.Date(now.Year(), 1, 1, 10, 30, 0, 0, time.Local)
@@ -59,10 +67,20 @@ func TestFormatDate_ThisYear(t *testing.T) {
 }
 
 func TestFormatDate_PastYear(t *testing.T) {
+	setEnglishLocale(t)
 	d := time.Date(2020, 6, 15, 12, 0, 0, 0, time.Local)
 	result := FormatDate(d)
 	if result != "Jun 15 2020" {
 		t.Errorf("FormatDate(2020-06-15) = %q, want 'Jun 15 2020'", result)
+	}
+}
+
+func TestFormatDate_TodayChinese(t *testing.T) {
+	t.Setenv("FILEX_LANG", "zh")
+	now := time.Now()
+	result := FormatDate(now)
+	if !strings.HasPrefix(result, "今天 ") {
+		t.Errorf("FormatDate(now) in zh = %q, expected prefix %q", result, "今天 ")
 	}
 }
 
@@ -96,12 +114,12 @@ type mockFileInfo struct {
 	isDir bool
 }
 
-func (m mockFileInfo) Name() string      { return m.name }
-func (m mockFileInfo) Size() int64       { return 0 }
-func (m mockFileInfo) Mode() os.FileMode { return 0 }
+func (m mockFileInfo) Name() string       { return m.name }
+func (m mockFileInfo) Size() int64        { return 0 }
+func (m mockFileInfo) Mode() os.FileMode  { return 0 }
 func (m mockFileInfo) ModTime() time.Time { return time.Time{} }
-func (m mockFileInfo) IsDir() bool       { return m.isDir }
-func (m mockFileInfo) Sys() interface{}  { return nil }
+func (m mockFileInfo) IsDir() bool        { return m.isDir }
+func (m mockFileInfo) Sys() interface{}   { return nil }
 
 func TestDetectMimeType_Dir(t *testing.T) {
 	info := mockFileInfo{name: "folder", isDir: true}

@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"filex/i18n"
 )
 
 // Bookmark represents a sidebar bookmark entry.
@@ -34,15 +36,15 @@ func NewBookmarkManager() *BookmarkManager {
 func (bm *BookmarkManager) initDefaults() {
 	home, _ := os.UserHomeDir()
 	bm.defaults = []Bookmark{
-		{Name: "Home", Path: home, Icon: "user-home"},
-		{Name: "Desktop", Path: filepath.Join(home, "Desktop"), Icon: "user-desktop"},
-		{Name: "Documents", Path: filepath.Join(home, "Documents"), Icon: "folder-documents"},
-		{Name: "Downloads", Path: filepath.Join(home, "Downloads"), Icon: "folder-download"},
-		{Name: "Music", Path: filepath.Join(home, "Music"), Icon: "folder-music"},
-		{Name: "Pictures", Path: filepath.Join(home, "Pictures"), Icon: "folder-pictures"},
-		{Name: "Videos", Path: filepath.Join(home, "Videos"), Icon: "folder-videos"},
-		{Name: "Trash", Path: filepath.Join(home, ".local/share/Trash/files"), Icon: "user-trash"},
-		{Name: "File System", Path: "/", Icon: "drive-harddisk"},
+		{Name: i18n.T("Home"), Path: home, Icon: "user-home"},
+		{Name: i18n.T("Desktop"), Path: filepath.Join(home, "Desktop"), Icon: "user-desktop"},
+		{Name: i18n.T("Documents"), Path: filepath.Join(home, "Documents"), Icon: "folder-documents"},
+		{Name: i18n.T("Downloads"), Path: filepath.Join(home, "Downloads"), Icon: "folder-download"},
+		{Name: i18n.T("Music"), Path: filepath.Join(home, "Music"), Icon: "folder-music"},
+		{Name: i18n.T("Pictures"), Path: filepath.Join(home, "Pictures"), Icon: "folder-pictures"},
+		{Name: i18n.T("Videos"), Path: filepath.Join(home, "Videos"), Icon: "folder-videos"},
+		{Name: i18n.T("Trash"), Path: filepath.Join(home, ".local/share/Trash/files"), Icon: "user-trash"},
+		{Name: i18n.T("File System"), Path: "/", Icon: "drive-harddisk"},
 	}
 
 	// Filter to only include directories that exist

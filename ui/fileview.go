@@ -12,6 +12,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/fileops"
+	"filex/i18n"
 	"filex/util"
 )
 
@@ -110,7 +111,7 @@ func (fv *FileView) buildTreeView() {
 
 	// Column: Icon + Name
 	nameCol, _ := gtk.TreeViewColumnNew()
-	nameCol.SetTitle("Name")
+	nameCol.SetTitle(i18n.T("Name"))
 	nameCol.SetExpand(true)
 	nameCol.SetResizable(true)
 	nameCol.SetMinWidth(200)
@@ -128,7 +129,7 @@ func (fv *FileView) buildTreeView() {
 
 	// Column: Size
 	sizeCol, _ := gtk.TreeViewColumnNew()
-	sizeCol.SetTitle("Size")
+	sizeCol.SetTitle(i18n.T("Size"))
 	sizeCol.SetResizable(true)
 	sizeCol.SetMinWidth(80)
 	sizeCol.SetSortColumnID(colSizeRaw)
@@ -139,7 +140,7 @@ func (fv *FileView) buildTreeView() {
 
 	// Column: Modified
 	dateCol, _ := gtk.TreeViewColumnNew()
-	dateCol.SetTitle("Modified")
+	dateCol.SetTitle(i18n.T("Modified"))
 	dateCol.SetResizable(true)
 	dateCol.SetMinWidth(120)
 	dateCol.SetSortColumnID(colDateRaw)

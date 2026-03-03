@@ -20,7 +20,7 @@ func TestIconForMime(t *testing.T) {
 		{"audio/mpeg", "audio-x-generic"},
 		{"video/mp4", "video-x-generic"},
 		{"application/octet-stream", "text-x-generic"}, // fallback
-		{"something/weird", "text-x-generic"},           // fallback
+		{"something/weird", "text-x-generic"},          // fallback
 	}
 	for _, tt := range tests {
 		got := IconForMime(tt.mime)

@@ -9,6 +9,7 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/fileops"
+	"filex/i18n"
 )
 
 // ShowContextMenu displays the right-click context menu.
@@ -33,7 +34,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Open
 	if hasSelection {
-		openItem := menuItem("Open", "document-open")
+		openItem := menuItem(i18n.T("Open"), "document-open")
 		openItem.Connect("activate", func() {
 			if isDir && selectedPath != "" {
 				tab.NavigateAndPush(selectedPath)
@@ -48,7 +49,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Open in Terminal
 	if isDir || !hasSelection {
-		termItem := menuItem("Open in Terminal", "utilities-terminal")
+		termItem := menuItem(i18n.T("Open in Terminal"), "utilities-terminal")
 		termItem.Connect("activate", func() {
 			dir := tab.Path
 			if isDir && selectedPath != "" {
@@ -62,7 +63,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	addSeparator(menu)
 
 	// New Folder
-	newFolderItem := menuItem("New Folder…", "folder-new")
+	newFolderItem := menuItem(i18n.T("New Folder…"), "folder-new")
 	newFolderItem.Connect("activate", func() {
 		ShowNewFolderDialog(tab)
 	})
@@ -71,7 +72,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	addSeparator(menu)
 
 	// Cut
-	cutItem := menuItem("Cut", "edit-cut")
+	cutItem := menuItem(i18n.T("Cut"), "edit-cut")
 	cutItem.SetSensitive(hasSelection)
 	cutItem.Connect("activate", func() {
 		tab.App.ClipboardPaths = selectedPaths
@@ -80,7 +81,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	menu.Append(cutItem)
 
 	// Copy
-	copyItem := menuItem("Copy", "edit-copy")
+	copyItem := menuItem(i18n.T("Copy"), "edit-copy")
 	copyItem.SetSensitive(hasSelection)
 	copyItem.Connect("activate", func() {
 		tab.App.ClipboardPaths = selectedPaths
@@ -89,7 +90,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	menu.Append(copyItem)
 
 	// Paste
-	pasteItem := menuItem("Paste", "edit-paste")
+	pasteItem := menuItem(i18n.T("Paste"), "edit-paste")
 	pasteItem.SetSensitive(len(tab.App.ClipboardPaths) > 0)
 	pasteItem.Connect("activate", func() {
 		dest := tab.Path
@@ -108,7 +109,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Copy Path
 	if hasSelection {
-		copyPathItem := menuItem("Copy Path", "edit-copy")
+		copyPathItem := menuItem(i18n.T("Copy Path"), "edit-copy")
 		copyPathItem.Connect("activate", func() {
 			fileops.CopyPathToClipboard(selectedPaths)
 		})
@@ -117,7 +118,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Rename
 	if len(selectedPaths) == 1 {
-		renameItem := menuItem("Rename…", "document-edit")
+		renameItem := menuItem(i18n.T("Rename…"), "document-edit")
 		renameItem.Connect("activate", func() {
 			ShowRenameDialog(tab, selectedPath)
 		})
@@ -126,7 +127,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Unzip (for .zip files)
 	if selectedPath != "" && strings.HasSuffix(strings.ToLower(selectedPath), ".zip") {
-		unzipItem := menuItem("Extract Here", "package-x-generic")
+		unzipItem := menuItem(i18n.T("Extract Here"), "package-x-generic")
 		unzipItem.Connect("activate", func() {
 			go func() {
 				fileops.Unzip(selectedPath, filepath.Dir(selectedPath))
@@ -140,7 +141,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	// Delete
 	if hasSelection {
-		deleteItem := menuItem("Move to Trash", "user-trash")
+		deleteItem := menuItem(i18n.T("Move to Trash"), "user-trash")
 		deleteItem.Connect("activate", func() {
 			ShowDeleteConfirmDialog(tab, selectedPaths)
 		})
@@ -150,7 +151,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	// Properties (placeholder)
 	if len(selectedPaths) == 1 {
 		addSeparator(menu)
-		propsItem := menuItem("Properties", "document-properties")
+		propsItem := menuItem(i18n.T("Properties"), "document-properties")
 		propsItem.Connect("activate", func() {
 			ShowPropertiesDialog(tab, selectedPath)
 		})

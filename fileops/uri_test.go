@@ -71,7 +71,7 @@ func TestURIToPath(t *testing.T) {
 		{"file:///home/user/file.txt", "/home/user/file.txt"},
 		{"file:///tmp/a b c.txt", "/tmp/a b c.txt"},
 		{"/already/a/path", "/already/a/path"},
-		{"file://", "file://"},   // too short, returned as-is
+		{"file://", "file://"},                       // too short, returned as-is
 		{"http://example.com", "http://example.com"}, // not file://, returned as-is
 	}
 	for _, tt := range tests {

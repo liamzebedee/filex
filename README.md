@@ -17,3 +17,4 @@ A GTK3 file manager for Linux inspired by Ubuntu's Nautilus circa 2012, built wi
 - **Search** — filter files in the current directory
 - **Keyboard shortcuts** — navigate and manage files without leaving the keyboard
 - **Status bar** — item count and free disk space at a glance
+- **Chinese i18n** — automatic Simplified Chinese UI when locale is `zh*` (or force with `FILEX_LANG=zh`)
