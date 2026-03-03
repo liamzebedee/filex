@@ -35,17 +35,16 @@ func NewToolbar(app *App) *Toolbar {
 	tb := &Toolbar{App: app}
 	var err error
 
-	tb.Box, err = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 4)
+	tb.Box, err = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 3)
 	if err != nil {
 		log.Fatal(err)
 	}
 	sc, _ := tb.Box.GetStyleContext()
 	sc.AddClass("toolbar-box")
 
-	// Navigation buttons
-	tb.BackBtn = toolButton("go-previous-symbolic", "Back")
-	tb.ForwardBtn = toolButton("go-next-symbolic", "Forward")
-	tb.UpBtn = toolButton("go-up-symbolic", "Up")
+	// Back / Forward — compact nav buttons
+	tb.BackBtn = navButton("go-previous-symbolic", "Back")
+	tb.ForwardBtn = navButton("go-next-symbolic", "Forward")
 
 	tb.BackBtn.Connect("clicked", func() {
 		if tab := app.ActiveTab(); tab != nil {
@@ -57,41 +56,32 @@ func NewToolbar(app *App) *Toolbar {
 			tab.GoForward()
 		}
 	})
-	tb.UpBtn.Connect("clicked", func() {
-		if tab := app.ActiveTab(); tab != nil {
-			tab.GoUp()
-		}
-	})
 
-	navBox, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
-	navBox.PackStart(tb.BackBtn, false, false, 0)
-	navBox.PackStart(tb.ForwardBtn, false, false, 0)
-	navBox.PackStart(tb.UpBtn, false, false, 0)
-	tb.Box.PackStart(navBox, false, false, 0)
+	tb.Box.PackStart(tb.BackBtn, false, false, 0)
+	tb.Box.PackStart(tb.ForwardBtn, false, false, 0)
 
 	// Path Stack: breadcrumb vs entry
 	tb.PathStack, _ = gtk.StackNew()
-	tb.PathStack.SetTransitionType(gtk.STACK_TRANSITION_TYPE_CROSSFADE)
-	tb.PathStack.SetTransitionDuration(100)
+	tb.PathStack.SetTransitionType(gtk.STACK_TRANSITION_TYPE_NONE)
+	tb.PathStack.SetTransitionDuration(0)
 
-	// Breadcrumb bar
+	// Breadcrumb bar wrapped in EventBox — click empty space to edit path
 	tb.BreadcrumbBox, _ = gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 0)
 	bcSc, _ := tb.BreadcrumbBox.GetStyleContext()
 	bcSc.AddClass("breadcrumb-bar")
 
-	// Make breadcrumb box clickable to switch to entry mode
 	breadcrumbEvent, _ := gtk.EventBoxNew()
 	breadcrumbEvent.Add(tb.BreadcrumbBox)
 	breadcrumbEvent.Connect("button-press-event", func(eb *gtk.EventBox, event *gdk.Event) bool {
 		btnEvent := gdk.EventButtonNewFromEvent(event)
-		if btnEvent.Button() == gdk.BUTTON_PRIMARY && btnEvent.Type() == gdk.EVENT_DOUBLE_BUTTON_PRESS {
+		if btnEvent.Button() == gdk.BUTTON_PRIMARY {
 			tb.ShowPathEntry()
 			return true
 		}
 		return false
 	})
 
-	// Path entry
+	// Path text entry (hidden by default)
 	tb.PathEntry, _ = gtk.EntryNew()
 	entrySc, _ := tb.PathEntry.GetStyleContext()
 	entrySc.AddClass("path-entry")
@@ -99,9 +89,9 @@ func NewToolbar(app *App) *Toolbar {
 		text, _ := tb.PathEntry.GetText()
 		text = strings.TrimSpace(text)
 		if text == "" {
+			tb.ShowBreadcrumb()
 			return
 		}
-		// Expand ~
 		if strings.HasPrefix(text, "~") {
 			home, _ := os.UserHomeDir()
 			text = filepath.Join(home, text[1:])
@@ -122,14 +112,18 @@ func NewToolbar(app *App) *Toolbar {
 		}
 		return false
 	})
+	tb.PathEntry.Connect("focus-out-event", func(entry *gtk.Entry, event *gdk.Event) bool {
+		tb.ShowBreadcrumb()
+		return false
+	})
 
 	tb.PathStack.AddNamed(breadcrumbEvent, "breadcrumb")
 	tb.PathStack.AddNamed(tb.PathEntry, "entry")
 	tb.PathStack.SetVisibleChildName("breadcrumb")
 
-	tb.Box.PackStart(tb.PathStack, true, true, 4)
+	tb.Box.PackStart(tb.PathStack, true, true, 0)
 
-	// Search entry
+	// Right-side icon buttons: search, view toggles
 	tb.SearchEntry, _ = gtk.SearchEntryNew()
 	searchSc, _ := tb.SearchEntry.GetStyleContext()
 	searchSc.AddClass("search-entry")
@@ -148,13 +142,13 @@ func NewToolbar(app *App) *Toolbar {
 	viewSc.AddClass("view-toggle")
 
 	tb.ListBtn, _ = gtk.ToggleButtonNew()
-	listImg, _ := gtk.ImageNewFromIconName("view-list-symbolic", gtk.ICON_SIZE_SMALL_TOOLBAR)
+	listImg, _ := gtk.ImageNewFromIconName("view-list-symbolic", gtk.ICON_SIZE_MENU)
 	tb.ListBtn.SetImage(listImg)
 	tb.ListBtn.SetActive(true)
 	tb.ListBtn.SetTooltipText("List view")
 
 	tb.IconBtn, _ = gtk.ToggleButtonNew()
-	iconImg, _ := gtk.ImageNewFromIconName("view-grid-symbolic", gtk.ICON_SIZE_SMALL_TOOLBAR)
+	iconImg, _ := gtk.ImageNewFromIconName("view-grid-symbolic", gtk.ICON_SIZE_MENU)
 	tb.IconBtn.SetImage(iconImg)
 	tb.IconBtn.SetTooltipText("Icon view")
 
@@ -186,13 +180,7 @@ func NewToolbar(app *App) *Toolbar {
 func (tb *Toolbar) UpdateForTab(tab *Tab) {
 	tb.BackBtn.SetSensitive(tab.CanGoBack())
 	tb.ForwardBtn.SetSensitive(tab.CanGoForward())
-
-	parent := filepath.Dir(tab.Path)
-	tb.UpBtn.SetSensitive(parent != tab.Path)
-
 	tb.updateBreadcrumb(tab.Path)
-
-	// Update view toggle
 	tb.ListBtn.SetActive(tab.ViewMode == ListMode)
 	tb.IconBtn.SetActive(tab.ViewMode == IconMode)
 }
@@ -213,7 +201,7 @@ func (tb *Toolbar) ShowBreadcrumb() {
 }
 
 func (tb *Toolbar) updateBreadcrumb(path string) {
-	// Remove old children
+	// Clear old children
 	tb.BreadcrumbBox.GetChildren().Foreach(func(item interface{}) {
 		if w, ok := item.(*gtk.Widget); ok {
 			tb.BreadcrumbBox.Remove(w)
@@ -232,19 +220,33 @@ func (tb *Toolbar) updateBreadcrumb(path string) {
 			accumulated = filepath.Join(accumulated, part)
 		}
 		displayName := part
-		if displayName == "" {
-			displayName = "/"
-		}
 
-		// Separator
+		// "/" separator between pills
 		if i > 0 {
-			sep, _ := gtk.LabelNew("›")
+			sep, _ := gtk.LabelNew("/")
 			sepSc, _ := sep.GetStyleContext()
 			sepSc.AddClass("breadcrumb-sep")
 			tb.BreadcrumbBox.PackStart(sep, false, false, 0)
 		}
 
-		// Button
+		// First segment gets a home icon instead of "/"
+		if i == 0 {
+			btn, _ := gtk.ButtonNew()
+			img, _ := gtk.ImageNewFromIconName("go-home-symbolic", gtk.ICON_SIZE_MENU)
+			btn.SetImage(img)
+			btnSc, _ := btn.GetStyleContext()
+			btnSc.AddClass("breadcrumb-btn")
+			btn.SetRelief(gtk.RELIEF_NONE)
+			targetPath := "/"
+			btn.Connect("clicked", func() {
+				if tab := tb.App.ActiveTab(); tab != nil {
+					tab.NavigateAndPush(targetPath)
+				}
+			})
+			tb.BreadcrumbBox.PackStart(btn, false, false, 0)
+			continue
+		}
+
 		btn, _ := gtk.ButtonNewWithLabel(displayName)
 		btnSc, _ := btn.GetStyleContext()
 		btnSc.AddClass("breadcrumb-btn")
@@ -262,12 +264,14 @@ func (tb *Toolbar) updateBreadcrumb(path string) {
 	tb.BreadcrumbBox.ShowAll()
 }
 
-func toolButton(iconName, tooltip string) *gtk.Button {
+func navButton(iconName, tooltip string) *gtk.Button {
 	btn, _ := gtk.ButtonNew()
-	img, _ := gtk.ImageNewFromIconName(iconName, gtk.ICON_SIZE_SMALL_TOOLBAR)
+	img, _ := gtk.ImageNewFromIconName(iconName, gtk.ICON_SIZE_MENU)
 	btn.SetImage(img)
 	btn.SetTooltipText(tooltip)
 	btn.SetRelief(gtk.RELIEF_NONE)
+	sc, _ := btn.GetStyleContext()
+	sc.AddClass("nav-btn")
 	return btn
 }
 

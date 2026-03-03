@@ -13,7 +13,6 @@ type App struct {
 	MainBox   *gtk.Box
 	Notebook  *gtk.Notebook
 	Sidebar   *Sidebar
-	Toolbar   *Toolbar
 	Statusbar *Statusbar
 
 	// Clipboard state for copy/cut/paste

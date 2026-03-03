@@ -139,43 +139,32 @@ func (s *Sidebar) getBookmarkAt(idx int) *bookmarks.Bookmark {
 }
 
 func (s *Sidebar) setupDragDrop() {
-	// Accept URI drops
-	target, _ := gtk.TargetEntryNew("text/uri-list", gtk.TARGET_OTHER_APP, 0)
-	targets := []gtk.TargetEntry{*target}
-	s.ListBox.DragDestSet(gtk.DEST_DEFAULT_ALL, targets, gdk.ACTION_COPY)
+	// Accept both internal (GTK_TREE_MODEL_ROW) and external (text/uri-list) drops
+	internalTarget, _ := gtk.TargetEntryNew("GTK_TREE_MODEL_ROW", gtk.TARGET_SAME_APP, 0)
+	internalTarget2, _ := gtk.TargetEntryNew("FILEX_INTERNAL", gtk.TARGET_SAME_APP, 1)
+	externalTarget, _ := gtk.TargetEntryNew("text/uri-list", gtk.TARGET_OTHER_APP, 2)
+	targets := []gtk.TargetEntry{*internalTarget, *internalTarget2, *externalTarget}
+	s.ListBox.DragDestSet(gtk.DEST_DEFAULT_MOTION|gtk.DEST_DEFAULT_DROP, targets, gdk.ACTION_COPY|gdk.ACTION_MOVE)
 
-	s.ListBox.Connect("drag-data-received", func(
-		widget *gtk.ListBox,
-		ctx *gdk.DragContext,
-		x, y int,
-		selData *gtk.SelectionData,
-		info uint,
-		time uint32,
-	) {
-		uris := selData.GetURIs()
-		for _, uri := range uris {
-			path := uriToPath(uri)
-			if path == "" {
-				continue
+	s.ListBox.Connect("drag-drop", func(widget *gtk.ListBox, ctx *gdk.DragContext, x, y int, tm uint32) bool {
+		log.Printf("[DnD] sidebar drag-drop: globalDragPaths=%d", len(globalDragPaths))
+
+		if len(globalDragPaths) > 0 {
+			log.Printf("[DnD]   sidebar adding bookmarks from globalDragPaths: %v", globalDragPaths)
+			for _, p := range globalDragPaths {
+				name := filepath.Base(p)
+				s.bookmarks.Add(bookmarks.Bookmark{
+					Name:      name,
+					Path:      p,
+					Icon:      "folder",
+					UserAdded: true,
+				})
 			}
-			name := filepath.Base(path)
-			s.bookmarks.Add(bookmarks.Bookmark{
-				Name:      name,
-				Path:      path,
-				Icon:      "folder",
-				UserAdded: true,
-			})
+			s.Populate()
+			return true
 		}
-		s.Populate()
+		return false
 	})
-}
-
-func uriToPath(uri string) string {
-	// Strip file:// prefix
-	if len(uri) > 7 && uri[:7] == "file://" {
-		return uri[7:]
-	}
-	return uri
 }
 
 // AddBookmark adds a path as a sidebar bookmark.

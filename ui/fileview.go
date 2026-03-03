@@ -27,6 +27,10 @@ const (
 	colDateRaw = 7 // int64 (for sorting)
 )
 
+// globalDragPaths holds paths being dragged across any FileView.
+// This is global because the source and destination FileView are different instances.
+var globalDragPaths []string
+
 // FileView manages both list and icon views with a shared ListStore.
 type FileView struct {
 	Tab       *Tab
@@ -159,8 +163,73 @@ func (fv *FileView) buildTreeView() {
 		return false
 	})
 
-	// Enable drag source for dragging files to sidebar bookmarks
-	fv.setupDragSource(fv.TreeView.Widget)
+	// DnD: Use EnableModelDragSource/Dest so GTK handles row-level drag and drop.
+	// We use a dummy target and never touch SelectionData (it's broken in gotk3).
+	// Instead we use globalDragPaths to pass data between drag-begin and drag-drop.
+	rowTarget, _ := gtk.TargetEntryNew("GTK_TREE_MODEL_ROW", gtk.TARGET_SAME_WIDGET, 0)
+	crossTarget, _ := gtk.TargetEntryNew("GTK_TREE_MODEL_ROW", gtk.TARGET_SAME_APP, 1)
+	targets := []gtk.TargetEntry{*rowTarget, *crossTarget}
+
+	fv.TreeView.EnableModelDragSource(gdk.BUTTON1_MASK, targets, gdk.ACTION_MOVE)
+	fv.TreeView.EnableModelDragDest(targets, gdk.ACTION_MOVE)
+
+	fv.TreeView.Connect("drag-begin", func(tv *gtk.TreeView, ctx *gdk.DragContext) {
+		globalDragPaths = fv.SelectedPaths()
+		log.Printf("[DnD] TreeView drag-begin: %d paths: %v", len(globalDragPaths), globalDragPaths)
+	})
+
+	// drag-drop: the actual drop event. We handle it entirely via globalDragPaths.
+	fv.TreeView.Connect("drag-drop", func(tv *gtk.TreeView, ctx *gdk.DragContext, x, y int, tm uint32) bool {
+		log.Printf("[DnD] TreeView drag-drop at (%d,%d), globalDragPaths=%d", x, y, len(globalDragPaths))
+		if len(globalDragPaths) == 0 {
+			return false
+		}
+
+		// Determine drop target: which row are we over?
+		destDir := fv.Tab.Path // default: drop into current directory
+		treePath, pos, ok := fv.TreeView.GetDestRowAtPos(x, y)
+		if ok && treePath != nil {
+			log.Printf("[DnD]   drop on row %s, pos=%v", treePath.String(), pos)
+			iter, err := fv.Store.GetIter(treePath)
+			if err == nil {
+				isDir, _ := getBoolFromStore(fv.Store, iter, colIsDir)
+				if isDir && (pos == gtk.TREE_VIEW_DROP_INTO_OR_BEFORE || pos == gtk.TREE_VIEW_DROP_INTO_OR_AFTER) {
+					rowPath, _ := getStringFromStore(fv.Store, iter, colPath)
+					destDir = rowPath
+					log.Printf("[DnD]   dropping INTO folder: %s", destDir)
+				}
+			}
+		} else {
+			log.Printf("[DnD]   drop on empty area, using current dir: %s", destDir)
+		}
+
+		sources := make([]string, 0, len(globalDragPaths))
+		for _, p := range globalDragPaths {
+			if filepath.Dir(p) != destDir {
+				sources = append(sources, p)
+			}
+		}
+		globalDragPaths = nil
+
+		log.Printf("[DnD]   moving %d files -> %s", len(sources), destDir)
+		if len(sources) > 0 {
+			go func() {
+				err := fileops.PasteFiles(sources, destDir, true)
+				log.Printf("[DnD]   PasteFiles result: err=%v", err)
+				glib_idle_add(func() {
+					fv.Refresh()
+					fv.refreshAllTabs()
+				})
+			}()
+		}
+
+		return true
+	})
+
+	fv.TreeView.Connect("drag-end", func(tv *gtk.TreeView, ctx *gdk.DragContext) {
+		log.Printf("[DnD] TreeView drag-end")
+		globalDragPaths = nil
+	})
 }
 
 func (fv *FileView) buildIconView() {
@@ -169,9 +238,6 @@ func (fv *FileView) buildIconView() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	// Use column indices for icon view rendering
-	// colIcon is a string column with icon names — we need pixbuf column
-	// Since we store icon names (not pixbufs), we use the text column and set markup
 	fv.IconView.SetTextColumn(colName)
 	fv.IconView.SetSelectionMode(gtk.SELECTION_MULTIPLE)
 	fv.IconView.SetItemWidth(80)
@@ -196,8 +262,76 @@ func (fv *FileView) buildIconView() {
 		return false
 	})
 
-	// Enable drag source for dragging files to sidebar bookmarks
-	fv.setupDragSource(fv.IconView.Widget)
+	// IconView DnD: use widget-level drag source + dest on the same widget
+	ivTarget, _ := gtk.TargetEntryNew("FILEX_INTERNAL", gtk.TARGET_SAME_APP, 0)
+	ivTargets := []gtk.TargetEntry{*ivTarget}
+	fv.IconView.ToWidget().DragSourceSet(gdk.BUTTON1_MASK, ivTargets, gdk.ACTION_MOVE)
+	fv.IconView.ToWidget().DragDestSet(gtk.DEST_DEFAULT_MOTION|gtk.DEST_DEFAULT_DROP, ivTargets, gdk.ACTION_MOVE)
+
+	fv.IconView.Connect("drag-begin", func(iv *gtk.IconView, ctx *gdk.DragContext) {
+		globalDragPaths = fv.SelectedPaths()
+		log.Printf("[DnD] IconView drag-begin: %d paths: %v", len(globalDragPaths), globalDragPaths)
+	})
+
+	fv.IconView.Connect("drag-drop", func(iv *gtk.IconView, ctx *gdk.DragContext, x, y int, tm uint32) bool {
+		log.Printf("[DnD] IconView drag-drop at (%d,%d), globalDragPaths=%d", x, y, len(globalDragPaths))
+		if len(globalDragPaths) == 0 {
+			return false
+		}
+		destDir := fv.Tab.Path
+		// Check if dropped on a folder icon
+		treePath := fv.IconView.GetPathAtPos(x, y)
+		if treePath != nil {
+			iter, err := fv.Store.GetIter(treePath)
+			if err == nil {
+				isDir, _ := getBoolFromStore(fv.Store, iter, colIsDir)
+				if isDir {
+					rowPath, _ := getStringFromStore(fv.Store, iter, colPath)
+					destDir = rowPath
+					log.Printf("[DnD]   IconView drop on folder: %s", destDir)
+				}
+			}
+		}
+
+		sources := make([]string, 0, len(globalDragPaths))
+		for _, p := range globalDragPaths {
+			if filepath.Dir(p) != destDir {
+				sources = append(sources, p)
+			}
+		}
+		globalDragPaths = nil
+
+		log.Printf("[DnD]   IconView moving %d files -> %s", len(sources), destDir)
+		if len(sources) > 0 {
+			go func() {
+				err := fileops.PasteFiles(sources, destDir, true)
+				log.Printf("[DnD]   PasteFiles result: err=%v", err)
+				glib_idle_add(func() {
+					fv.Refresh()
+					fv.refreshAllTabs()
+				})
+			}()
+		}
+		return true
+	})
+
+	fv.IconView.Connect("drag-end", func(iv *gtk.IconView, ctx *gdk.DragContext) {
+		log.Printf("[DnD] IconView drag-end")
+		globalDragPaths = nil
+	})
+}
+
+// refreshAllTabs refreshes all open tabs (useful after file move operations).
+func (fv *FileView) refreshAllTabs() {
+	app := fv.Tab.App
+	for _, tab := range tabRegistry {
+		if tab != fv.Tab {
+			tab.FileView.Refresh()
+		}
+	}
+	if app.Statusbar != nil {
+		app.Statusbar.Update(fv.Tab)
+	}
 }
 
 func (fv *FileView) activateRow(path *gtk.TreePath) {
@@ -285,7 +419,6 @@ func (fv *FileView) SelectedPath() string {
 	return ""
 }
 
-// Helper to get a string value from the ListStore
 func getStringFromStore(store *gtk.ListStore, iter *gtk.TreeIter, col int) (string, error) {
 	val, err := store.GetValue(iter, col)
 	if err != nil {
@@ -294,7 +427,6 @@ func getStringFromStore(store *gtk.ListStore, iter *gtk.TreeIter, col int) (stri
 	return val.GetString()
 }
 
-// Helper to get a bool value from the ListStore
 func getBoolFromStore(store *gtk.ListStore, iter *gtk.TreeIter, col int) (bool, error) {
 	val, err := store.GetValue(iter, col)
 	if err != nil {
@@ -340,30 +472,6 @@ func (fv *FileView) populateStore(entries []fileops.FileEntry) {
 			[]interface{}{icon, e.Name, sizeStr, dateStr, e.Path, e.IsDir, e.Size, e.ModTime},
 		)
 	}
-}
-
-// setupDragSource configures a widget to provide URI data when dragged.
-func (fv *FileView) setupDragSource(w gtk.Widget) {
-	target, _ := gtk.TargetEntryNew("text/uri-list", gtk.TARGET_OTHER_APP, 0)
-	w.DragSourceSet(gdk.BUTTON1_MASK, []gtk.TargetEntry{*target}, gdk.ACTION_COPY)
-
-	w.Connect("drag-data-get", func(
-		widget *gtk.Widget,
-		ctx *gdk.DragContext,
-		selData *gtk.SelectionData,
-		info uint,
-		time uint32,
-	) {
-		paths := fv.SelectedPaths()
-		if len(paths) == 0 {
-			return
-		}
-		var uris []string
-		for _, p := range paths {
-			uris = append(uris, "file://"+p)
-		}
-		selData.SetURIs(uris)
-	})
 }
 
 // GetSelectedName returns the name of the first selected file

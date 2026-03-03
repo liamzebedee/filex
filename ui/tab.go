@@ -15,8 +15,9 @@ var tabRegistry = make(map[uintptr]*Tab)
 // Tab represents a single file browser tab.
 type Tab struct {
 	App      *App
+	Toolbar  *Toolbar
 	FileView *FileView
-	Box      *gtk.Box // container widget added to notebook
+	Box      *gtk.Box   // container widget added to notebook
 	TabLabel *gtk.Label // the label in the tab header
 
 	Path         string
@@ -52,6 +53,11 @@ func NewTab(app *App, path string) *Tab {
 		log.Fatal(err)
 	}
 
+	// Per-tab toolbar: back/fwd, breadcrumb, search, view toggle
+	tab.Toolbar = NewToolbar(app)
+	tab.Box.PackStart(tab.Toolbar.Box, false, false, 0)
+
+	// File view
 	tab.FileView = NewFileView(tab)
 	tab.Box.PackStart(tab.FileView.ScrollWin, true, true, 0)
 
@@ -111,8 +117,8 @@ func (t *Tab) Navigate(path string) {
 	t.Path = path
 	t.FileView.Refresh()
 	t.updateTabLabel()
-	if t.App.Toolbar != nil {
-		t.App.Toolbar.UpdateForTab(t)
+	if t.Toolbar != nil {
+		t.Toolbar.UpdateForTab(t)
 	}
 	if t.App.Statusbar != nil {
 		t.App.Statusbar.Update(t)
@@ -121,7 +127,6 @@ func (t *Tab) Navigate(path string) {
 
 // NavigateAndPush navigates and pushes to history.
 func (t *Tab) NavigateAndPush(path string) {
-	// Trim forward history
 	if t.HistoryIndex < len(t.History)-1 {
 		t.History = t.History[:t.HistoryIndex+1]
 	}
@@ -180,7 +185,6 @@ func (t *Tab) Close() {
 	if pageNum < 0 {
 		return
 	}
-	// Don't close the last tab
 	if t.App.Notebook.GetNPages() <= 1 {
 		return
 	}

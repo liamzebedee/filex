@@ -65,7 +65,7 @@ func setupKeyboardShortcuts(app *App) {
 
 		// Ctrl+L: Focus path entry
 		case ctrl && !shift && key == gdk.KEY_l:
-			app.Toolbar.ShowPathEntry()
+			tab.Toolbar.ShowPathEntry()
 			return true
 
 		// Ctrl+H: Toggle hidden files
