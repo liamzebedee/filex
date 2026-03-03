@@ -1,0 +1,5 @@
+filex (1.0.0~noble1) noble; urgency=low
+
+  * Initial release for Ubuntu 24.04 Noble.
+
+ -- Liam Zebedee <liamzebedee@gmail.com>  Wed, 04 Mar 2026 00:29:34 +1100

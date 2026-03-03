@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="folderGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f0c850"/>
+      <stop offset="100%" stop-color="#d4a017"/>
+    </linearGradient>
+    <linearGradient id="folderFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5d978"/>
+      <stop offset="100%" stop-color="#c8960c"/>
+    </linearGradient>
+    <linearGradient id="tabGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5d978"/>
+      <stop offset="100%" stop-color="#e0b430"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="120%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <!-- Folder back -->
+  <rect x="12" y="36" width="104" height="76" rx="4" ry="4" fill="url(#folderGrad)" filter="url(#shadow)"/>
+  <!-- Folder tab -->
+  <path d="M12,36 L12,24 Q12,20 16,20 L48,20 Q52,20 54,24 L58,32 Q60,36 64,36 Z" fill="url(#tabGrad)"/>
+  <!-- Folder front -->
+  <rect x="8" y="48" width="112" height="68" rx="4" ry="4" fill="url(#folderFront)"/>
+  <!-- Folder front bottom edge highlight -->
+  <rect x="8" y="108" width="112" height="8" rx="0" ry="4" fill="#b8860b" opacity="0.5"/>
+  <!-- File page 1 -->
+  <rect x="40" y="32" width="48" height="56" rx="2" ry="2" fill="#f8f8f0" stroke="#bbb" stroke-width="1"/>
+  <line x1="48" y1="44" x2="80" y2="44" stroke="#ccc" stroke-width="2"/>
+  <line x1="48" y1="52" x2="76" y2="52" stroke="#ccc" stroke-width="2"/>
+  <line x1="48" y1="60" x2="72" y2="60" stroke="#ccc" stroke-width="2"/>
+  <line x1="48" y1="68" x2="78" y2="68" stroke="#ccc" stroke-width="2"/>
+  <!-- Ubuntu/Ambiance orange accent bar -->
+  <rect x="8" y="48" width="112" height="4" rx="2" ry="0" fill="#dd4814" opacity="0.85"/>
+</svg>

@@ -3,16 +3,20 @@ package ui
 import (
 	"fmt"
 	"log"
+	"time"
 
+	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"golang.org/x/sys/unix"
 )
 
-// Statusbar shows item count and free disk space.
+// Statusbar shows item count, feedback messages, and free disk space.
 type Statusbar struct {
-	Box       *gtk.Box
-	ItemLabel *gtk.Label
+	Box        *gtk.Box
+	ItemLabel  *gtk.Label
+	MsgLabel   *gtk.Label
 	SpaceLabel *gtk.Label
+	msgExpiry  time.Time
 }
 
 func NewStatusbar() *Statusbar {
@@ -28,13 +32,30 @@ func NewStatusbar() *Statusbar {
 
 	sb.ItemLabel, _ = gtk.LabelNew("")
 	sb.ItemLabel.SetHAlign(gtk.ALIGN_START)
-	sb.Box.PackStart(sb.ItemLabel, true, true, 0)
+	sb.Box.PackStart(sb.ItemLabel, false, false, 0)
+
+	sb.MsgLabel, _ = gtk.LabelNew("")
+	sb.MsgLabel.SetHAlign(gtk.ALIGN_CENTER)
+	sb.Box.SetCenterWidget(sb.MsgLabel)
 
 	sb.SpaceLabel, _ = gtk.LabelNew("")
 	sb.SpaceLabel.SetHAlign(gtk.ALIGN_END)
 	sb.Box.PackEnd(sb.SpaceLabel, false, false, 0)
 
 	return sb
+}
+
+// ShowMessage displays a temporary feedback message in the statusbar.
+func (sb *Statusbar) ShowMessage(msg string) {
+	sb.MsgLabel.SetText(msg)
+	sb.msgExpiry = time.Now().Add(4 * time.Second)
+	glib.TimeoutAdd(4000, func() bool {
+		if time.Now().Before(sb.msgExpiry) {
+			return false // a newer message replaced this one
+		}
+		sb.MsgLabel.SetText("")
+		return false
+	})
 }
 
 // Update refreshes the statusbar for the given tab.

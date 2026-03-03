@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Filex
+Comment=File Manager
+Exec=/usr/bin/filex
+Icon=filex
+Terminal=false
+Type=Application
+Categories=System;FileManager;Utility;GTK;
+MimeType=inode/directory;

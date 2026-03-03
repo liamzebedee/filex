@@ -1,0 +1,17 @@
+Source: filex
+Section: utils
+Priority: optional
+Maintainer: Liam Zebedee <liamzebedee@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+               golang-go (>= 2:1.21~),
+               libgtk-3-dev,
+               pkg-config
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+
+Package: filex
+Architecture: any
+Depends: libgtk-3-0, ${shlibs:Depends}, ${misc:Depends}
+Description: GTK3 file manager with Ubuntu Ambiance aesthetic
+ Filex is a file manager that recreates the look and feel of
+ Ubuntu Nautilus circa 2012 with the Ambiance theme.

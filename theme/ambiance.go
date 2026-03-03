@@ -188,6 +188,13 @@ headerbar button:active, .dark-headerbar button:active {
     padding: 8px 12px 4px 12px;
 }
 
+.sidebar-header-row,
+.sidebar-header-row:selected,
+.sidebar-header-row:hover {
+    background: transparent;
+    background-color: #e8e6e3;
+}
+
 .sidebar label {
     font-size: 13px;
     color: #3c3b37;

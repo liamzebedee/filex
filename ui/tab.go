@@ -4,6 +4,7 @@ import (
 	"log"
 	"path/filepath"
 
+	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/fileops"
@@ -114,6 +115,7 @@ func (t *Tab) updateTabLabel() {
 
 // Navigate changes the tab's directory and refreshes the view.
 func (t *Tab) Navigate(path string) {
+	t.setBusyCursor(true)
 	t.Path = path
 	t.FileView.Refresh()
 	t.updateTabLabel()
@@ -122,6 +124,27 @@ func (t *Tab) Navigate(path string) {
 	}
 	if t.App.Statusbar != nil {
 		t.App.Statusbar.Update(t)
+	}
+	t.setBusyCursor(false)
+}
+
+// setBusyCursor sets or clears the watch cursor on the window.
+func (t *Tab) setBusyCursor(busy bool) {
+	win, err := t.App.Window.GetWindow()
+	if err != nil || win == nil {
+		return
+	}
+	if busy {
+		display, err := gdk.DisplayGetDefault()
+		if err != nil {
+			return
+		}
+		cursor, err := gdk.CursorNewFromName(display, "wait")
+		if err == nil {
+			win.SetCursor(cursor)
+		}
+	} else {
+		win.SetCursor(nil)
 	}
 }
 

@@ -158,11 +158,18 @@ func ShowDeleteConfirmDialog(tab *Tab, paths []string) {
 	dialog.Destroy()
 
 	if response == gtk.RESPONSE_OK {
+		n := len(paths)
 		go func() {
 			for _, p := range paths {
 				fileops.TrashFile(p)
 			}
-			gtkIdleRefresh(tab)
+			glib_idle_add(func() {
+				tab.FileView.Refresh()
+				if tab.App.Statusbar != nil {
+					tab.App.Statusbar.Update(tab)
+					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved to trash"))
+				}
+			})
 		}()
 	}
 }

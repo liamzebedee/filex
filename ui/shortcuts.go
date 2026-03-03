@@ -1,12 +1,22 @@
 package ui
 
 import (
+	"fmt"
+
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/fileops"
 )
+
+// itemCountMsg returns e.g. "3 items moved" or "1 item copied to clipboard".
+func itemCountMsg(n int, action string) string {
+	if n == 1 {
+		return fmt.Sprintf("1 item %s", action)
+	}
+	return fmt.Sprintf("%d items %s", n, action)
+}
 
 // glib_idle_add schedules a function to run on the GTK main thread.
 func glib_idle_add(fn func()) {
@@ -94,6 +104,7 @@ func setupKeyboardShortcuts(app *App) {
 			if len(paths) > 0 {
 				app.ClipboardPaths = paths
 				app.ClipboardCut = false
+				app.Statusbar.ShowMessage(itemCountMsg(len(paths), "copied to clipboard"))
 			}
 			return true
 
@@ -103,14 +114,24 @@ func setupKeyboardShortcuts(app *App) {
 			if len(paths) > 0 {
 				app.ClipboardPaths = paths
 				app.ClipboardCut = true
+				app.Statusbar.ShowMessage(itemCountMsg(len(paths), "cut to clipboard"))
 			}
 			return true
 
 		// Ctrl+V: Paste
 		case ctrl && !shift && key == gdk.KEY_v:
 			if len(app.ClipboardPaths) > 0 {
+				n := len(app.ClipboardPaths)
+				cut := app.ClipboardCut
 				go func() {
 					PasteAndRefresh(app, tab)
+					glib_idle_add(func() {
+						if cut {
+							app.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
+						} else {
+							app.Statusbar.ShowMessage(itemCountMsg(n, "pasted"))
+						}
+					})
 				}()
 			}
 			return true

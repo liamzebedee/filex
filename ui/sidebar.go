@@ -72,12 +72,21 @@ func (s *Sidebar) Populate() {
 		}
 	})
 
-	// Add header
+	// Add header (non-selectable, non-activatable)
 	header, _ := gtk.LabelNew("Places")
 	headerSc, _ := header.GetStyleContext()
 	headerSc.AddClass("sidebar-header")
 	header.SetHAlign(gtk.ALIGN_START)
 	s.ListBox.Add(header)
+
+	// Make the header row non-selectable
+	headerRow := s.ListBox.GetRowAtIndex(0)
+	if headerRow != nil {
+		headerRow.SetSelectable(false)
+		headerRow.SetActivatable(false)
+		hsc, _ := headerRow.GetStyleContext()
+		hsc.AddClass("sidebar-header-row")
+	}
 
 	// Add bookmarks
 	for _, bm := range s.bookmarks.All() {

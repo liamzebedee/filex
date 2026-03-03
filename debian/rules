@@ -1,0 +1,29 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+
+$(eval HOME := $(CURDIR))
+export HOME
+
+export GOPATH      = $(CURDIR)/.gopath
+export GOMODCACHE  = $(CURDIR)/.gomodcache
+export GOTMPDIR    = $(CURDIR)/.gotmp
+export GOTOOLCHAIN = local
+export GOFLAGS     = -mod=vendor
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	mkdir -p $(GOPATH) $(GOMODCACHE) $(GOTMPDIR)
+	go build -mod=vendor -o filex .
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -Dm755 filex debian/filex/usr/bin/filex
+	install -Dm644 assets/filex.desktop debian/filex/usr/share/applications/filex.desktop
+	install -Dm644 assets/filex.svg debian/filex/usr/share/icons/hicolor/scalable/apps/filex.svg
+
+override_dh_auto_clean:
+	rm -rf filex .gopath .gomodcache .gotmp

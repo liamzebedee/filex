@@ -3,6 +3,7 @@ package ui
 import (
 	"log"
 	"os"
+	"path/filepath"
 
 	"github.com/gotk3/gotk3/gtk"
 )
@@ -38,7 +39,21 @@ func (a *App) buildWindow() {
 		gtk.MainQuit()
 	})
 
-	a.Window.SetIconName("system-file-manager")
+	// Try loading icon from file (works without system install)
+	iconPaths := []string{
+		"/usr/share/icons/hicolor/scalable/apps/filex.svg",
+	}
+	if exe, err2 := os.Executable(); err2 == nil {
+		iconPaths = append([]string{filepath.Join(filepath.Dir(exe), "assets", "filex.svg")}, iconPaths...)
+	}
+	if cwd, err2 := os.Getwd(); err2 == nil {
+		iconPaths = append([]string{filepath.Join(cwd, "assets", "filex.svg")}, iconPaths...)
+	}
+	for _, p := range iconPaths {
+		if err2 := gtk.WindowSetDefaultIconFromFile(p); err2 == nil {
+			break
+		}
+	}
 
 	BuildWindow(a)
 }

@@ -17,3 +17,22 @@ A GTK3 file manager for Linux inspired by Ubuntu's Nautilus circa 2012, built wi
 - **Search** — filter files in the current directory
 - **Keyboard shortcuts** — navigate and manage files without leaving the keyboard
 - **Status bar** — item count and free disk space at a glance
+
+## Install
+
+### Ubuntu (PPA)
+
+```bash
+sudo add-apt-repository ppa:liamzebedee/filex
+sudo apt update
+sudo apt install filex
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/liamzebedee/filex.git
+cd filex
+make build
+sudo make install
+```

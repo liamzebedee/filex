@@ -213,12 +213,16 @@ func (fv *FileView) buildTreeView() {
 
 		log.Printf("[DnD]   moving %d files -> %s", len(sources), destDir)
 		if len(sources) > 0 {
+			n := len(sources)
 			go func() {
 				err := fileops.PasteFiles(sources, destDir, true)
 				log.Printf("[DnD]   PasteFiles result: err=%v", err)
 				glib_idle_add(func() {
 					fv.Refresh()
 					fv.refreshAllTabs()
+					if fv.Tab.App.Statusbar != nil {
+						fv.Tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
+					}
 				})
 			}()
 		}
@@ -252,12 +256,21 @@ func (fv *FileView) buildIconView() {
 		fv.activateRow(path)
 	})
 
-	// Right-click
+	// Handle double-click before DnD can intercept it, and right-click for context menu
 	fv.IconView.Connect("button-press-event", func(iv *gtk.IconView, event *gdk.Event) bool {
 		btnEvent := gdk.EventButtonNewFromEvent(event)
 		if btnEvent.Button() == gdk.BUTTON_SECONDARY {
 			fv.showContextMenu(btnEvent)
 			return true
+		}
+		if btnEvent.Button() == gdk.BUTTON_PRIMARY && btnEvent.Type() == gdk.EVENT_DOUBLE_BUTTON_PRESS {
+			x := int(btnEvent.X())
+			y := int(btnEvent.Y())
+			path := fv.IconView.GetPathAtPos(x, y)
+			if path != nil {
+				fv.activateRow(path)
+				return true
+			}
 		}
 		return false
 	})
@@ -303,12 +316,16 @@ func (fv *FileView) buildIconView() {
 
 		log.Printf("[DnD]   IconView moving %d files -> %s", len(sources), destDir)
 		if len(sources) > 0 {
+			n := len(sources)
 			go func() {
 				err := fileops.PasteFiles(sources, destDir, true)
 				log.Printf("[DnD]   PasteFiles result: err=%v", err)
 				glib_idle_add(func() {
 					fv.Refresh()
 					fv.refreshAllTabs()
+					if fv.Tab.App.Statusbar != nil {
+						fv.Tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
+					}
 				})
 			}()
 		}

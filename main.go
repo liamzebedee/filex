@@ -5,6 +5,7 @@ import (
 	"os"
 
 	"github.com/gotk3/gotk3/gdk"
+	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 
 	"filex/theme"
@@ -13,6 +14,7 @@ import (
 
 func main() {
 	gtk.Init(&os.Args)
+	glib.SetPrgname("filex")
 
 	// Load Ambiance CSS
 	cssProvider, err := gtk.CssProviderNew()

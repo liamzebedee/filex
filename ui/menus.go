@@ -76,6 +76,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	cutItem.Connect("activate", func() {
 		tab.App.ClipboardPaths = selectedPaths
 		tab.App.ClipboardCut = true
+		tab.App.Statusbar.ShowMessage(itemCountMsg(len(selectedPaths), "cut to clipboard"))
 	})
 	menu.Append(cutItem)
 
@@ -85,6 +86,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	copyItem.Connect("activate", func() {
 		tab.App.ClipboardPaths = selectedPaths
 		tab.App.ClipboardCut = false
+		tab.App.Statusbar.ShowMessage(itemCountMsg(len(selectedPaths), "copied to clipboard"))
 	})
 	menu.Append(copyItem)
 
@@ -93,13 +95,25 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	pasteItem.SetSensitive(len(tab.App.ClipboardPaths) > 0)
 	pasteItem.Connect("activate", func() {
 		dest := tab.Path
+		n := len(tab.App.ClipboardPaths)
+		cut := tab.App.ClipboardCut
 		go func() {
 			fileops.PasteFiles(tab.App.ClipboardPaths, dest, tab.App.ClipboardCut)
-			if tab.App.ClipboardCut {
+			if cut {
 				tab.App.ClipboardPaths = nil
 				tab.App.ClipboardCut = false
 			}
-			gtkIdleRefresh(tab)
+			glib_idle_add(func() {
+				tab.FileView.Refresh()
+				if tab.App.Statusbar != nil {
+					tab.App.Statusbar.Update(tab)
+				}
+				if cut {
+					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
+				} else {
+					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "pasted"))
+				}
+			})
 		}()
 	})
 	menu.Append(pasteItem)
@@ -111,6 +125,7 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 		copyPathItem := menuItem("Copy Path", "edit-copy")
 		copyPathItem.Connect("activate", func() {
 			fileops.CopyPathToClipboard(selectedPaths)
+			tab.App.Statusbar.ShowMessage("Path copied to clipboard")
 		})
 		menu.Append(copyPathItem)
 	}
@@ -129,8 +144,18 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 		unzipItem := menuItem("Extract Here", "package-x-generic")
 		unzipItem.Connect("activate", func() {
 			go func() {
-				fileops.Unzip(selectedPath, filepath.Dir(selectedPath))
-				gtkIdleRefresh(tab)
+				err := fileops.Unzip(selectedPath, filepath.Dir(selectedPath))
+				glib_idle_add(func() {
+					tab.FileView.Refresh()
+					if tab.App.Statusbar != nil {
+						tab.App.Statusbar.Update(tab)
+						if err == nil {
+							tab.App.Statusbar.ShowMessage("Archive extracted")
+						} else {
+							tab.App.Statusbar.ShowMessage("Extract failed: " + err.Error())
+						}
+					}
+				})
 			}()
 		})
 		menu.Append(unzipItem)
