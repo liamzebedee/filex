@@ -1,5 +1,5 @@
-filex (1.0.0~noble1) noble; urgency=low
+filex (1.0.0~noble3) noble; urgency=low
 
-  * Initial release for Ubuntu 24.04 Noble.
+  * Downgrade golang.org/x/sys to v0.28.0 for Go 1.22 compatibility.
 
- -- Liam Zebedee <liamzebedee@gmail.com>  Wed, 04 Mar 2026 00:29:34 +1100
+ -- Liam Zebedee <liamzebedee@gmail.com>  Wed, 04 Mar 2026 01:02:56 +1100

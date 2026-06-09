@@ -49,10 +49,11 @@ func BuildWindow(app *App) {
 	}
 	app.Notebook.SetScrollable(true)
 	app.Notebook.SetShowBorder(false)
+	// The page argument is the tab being switched to; the notebook's
+	// current-page index still points at the old page during this signal.
 	app.Notebook.Connect("switch-page", func(nb *gtk.Notebook, page *gtk.Widget, pageNum uint) {
-		tab, ok := tabRegistry[page.Native()]
-		if ok {
-			app.Statusbar.Update(tab)
+		if tab, ok := tabRegistry[page.Native()]; ok {
+			app.Statusbar.Render(tab.State.Path(), len(tab.visible()))
 		}
 	})
 	rightBox.PackStart(app.Notebook, true, true, 0)
@@ -68,8 +69,7 @@ func BuildWindow(app *App) {
 	app.Window.Add(mainBox)
 
 	// Open initial tab
-	startPath := GetStartPath()
-	NewTab(app, startPath)
+	NewTab(app, GetStartPath())
 
 	// Set up keyboard shortcuts
 	setupKeyboardShortcuts(app)

@@ -45,13 +45,12 @@ func NewSidebar(app *App) *Sidebar {
 		if row == nil {
 			return
 		}
-		idx := row.GetIndex()
-		bm := s.getBookmarkAt(idx)
+		bm := s.getBookmarkAt(row.GetIndex())
 		if bm == nil {
 			return
 		}
 		if tab := app.ActiveTab(); tab != nil {
-			tab.NavigateAndPush(bm.Path)
+			tab.NavigateTo(bm.Path)
 		}
 	})
 
@@ -59,12 +58,13 @@ func NewSidebar(app *App) *Sidebar {
 	s.setupDragDrop()
 
 	s.ScrollWin.Add(s.ListBox)
-	s.Populate()
+	s.Render()
 
 	return s
 }
 
-func (s *Sidebar) Populate() {
+// Render rebuilds the sidebar rows from the bookmark list.
+func (s *Sidebar) Render() {
 	// Remove existing rows
 	s.ListBox.GetChildren().Foreach(func(item interface{}) {
 		if w, ok := item.(*gtk.Widget); ok {
@@ -79,19 +79,15 @@ func (s *Sidebar) Populate() {
 	header.SetHAlign(gtk.ALIGN_START)
 	s.ListBox.Add(header)
 
-	// Make the header row non-selectable
-	headerRow := s.ListBox.GetRowAtIndex(0)
-	if headerRow != nil {
+	if headerRow := s.ListBox.GetRowAtIndex(0); headerRow != nil {
 		headerRow.SetSelectable(false)
 		headerRow.SetActivatable(false)
 		hsc, _ := headerRow.GetStyleContext()
 		hsc.AddClass("sidebar-header-row")
 	}
 
-	// Add bookmarks
 	for _, bm := range s.bookmarks.All() {
-		row := s.createBookmarkRow(bm)
-		s.ListBox.Add(row)
+		s.ListBox.Add(s.createBookmarkRow(bm))
 	}
 
 	s.ListBox.ShowAll()
@@ -110,10 +106,11 @@ func (s *Sidebar) createBookmarkRow(bm bookmarks.Bookmark) *gtk.Box {
 
 	// Right-click to remove user bookmarks
 	if bm.UserAdded {
+		path := bm.Path
 		box.Connect("button-press-event", func(b *gtk.Box, event *gdk.Event) bool {
 			btnEvent := gdk.EventButtonNewFromEvent(event)
 			if btnEvent.Button() == gdk.BUTTON_SECONDARY {
-				s.showRemoveMenu(bm.Path, btnEvent)
+				s.showRemoveMenu(path)
 				return true
 			}
 			return false
@@ -123,13 +120,13 @@ func (s *Sidebar) createBookmarkRow(bm bookmarks.Bookmark) *gtk.Box {
 	return box
 }
 
-func (s *Sidebar) showRemoveMenu(path string, event *gdk.EventButton) {
+func (s *Sidebar) showRemoveMenu(path string) {
 	menu, _ := gtk.MenuNew()
 
 	removeItem, _ := gtk.MenuItemNewWithLabel("Remove Bookmark")
 	removeItem.Connect("activate", func() {
 		s.bookmarks.Remove(path)
-		s.Populate()
+		s.Render()
 	})
 	menu.Append(removeItem)
 	menu.ShowAll()
@@ -137,14 +134,12 @@ func (s *Sidebar) showRemoveMenu(path string, event *gdk.EventButton) {
 }
 
 func (s *Sidebar) getBookmarkAt(idx int) *bookmarks.Bookmark {
-	// Index 0 is the header
 	all := s.bookmarks.All()
-	bmIdx := idx - 1 // account for header
+	bmIdx := idx - 1 // index 0 is the header row
 	if bmIdx < 0 || bmIdx >= len(all) {
 		return nil
 	}
-	bm := all[bmIdx]
-	return &bm
+	return &all[bmIdx]
 }
 
 func (s *Sidebar) setupDragDrop() {
@@ -156,34 +151,24 @@ func (s *Sidebar) setupDragDrop() {
 	s.ListBox.DragDestSet(gtk.DEST_DEFAULT_MOTION|gtk.DEST_DEFAULT_DROP, targets, gdk.ACTION_COPY|gdk.ACTION_MOVE)
 
 	s.ListBox.Connect("drag-drop", func(widget *gtk.ListBox, ctx *gdk.DragContext, x, y int, tm uint32) bool {
-		log.Printf("[DnD] sidebar drag-drop: globalDragPaths=%d", len(globalDragPaths))
-
-		if len(globalDragPaths) > 0 {
-			log.Printf("[DnD]   sidebar adding bookmarks from globalDragPaths: %v", globalDragPaths)
-			for _, p := range globalDragPaths {
-				name := filepath.Base(p)
-				s.bookmarks.Add(bookmarks.Bookmark{
-					Name:      name,
-					Path:      p,
-					Icon:      "folder",
-					UserAdded: true,
-				})
-			}
-			s.Populate()
-			return true
+		if len(globalDragPaths) == 0 {
+			return false
 		}
-		return false
+		for _, p := range globalDragPaths {
+			s.AddBookmark(p)
+		}
+		globalDragPaths = nil
+		return true
 	})
 }
 
-// AddBookmark adds a path as a sidebar bookmark.
+// AddBookmark adds a path as a user bookmark and re-renders.
 func (s *Sidebar) AddBookmark(path string) {
-	name := filepath.Base(path)
 	s.bookmarks.Add(bookmarks.Bookmark{
-		Name:      name,
+		Name:      filepath.Base(path),
 		Path:      path,
 		Icon:      "folder",
 		UserAdded: true,
 	})
-	s.Populate()
+	s.Render()
 }

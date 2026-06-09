@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -11,23 +10,26 @@ import (
 	"filex/fileops"
 )
 
-// ShowContextMenu displays the right-click context menu.
+// ShowContextMenu displays the right-click context menu. Selection state
+// is read once, up front; every item dispatches through the same shared
+// actions as the keyboard shortcuts.
 func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	menu, _ := gtk.MenuNew()
 
+	app := tab.App
 	selectedPaths := tab.FileView.SelectedPaths()
-	selectedPath := ""
-	if len(selectedPaths) == 1 {
-		selectedPath = selectedPaths[0]
-	}
 	hasSelection := len(selectedPaths) > 0
 
-	// If single selection is a directory
+	// Single selection, if any, and whether it is a directory
+	selectedPath := ""
 	isDir := false
-	if selectedPath != "" {
-		info, err := os.Stat(selectedPath)
-		if err == nil {
-			isDir = info.IsDir()
+	if len(selectedPaths) == 1 {
+		selectedPath = selectedPaths[0]
+		for _, e := range tab.Entries {
+			if e.Path == selectedPath {
+				isDir = e.IsDir
+				break
+			}
 		}
 	}
 
@@ -35,12 +37,12 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	if hasSelection {
 		openItem := menuItem("Open", "document-open")
 		openItem.Connect("activate", func() {
-			if isDir && selectedPath != "" {
-				tab.NavigateAndPush(selectedPath)
-			} else {
-				for _, p := range selectedPaths {
-					fileops.OpenFile(p)
-				}
+			if isDir {
+				tab.NavigateTo(selectedPath)
+				return
+			}
+			for _, p := range selectedPaths {
+				fileops.OpenFile(p)
 			}
 		})
 		menu.Append(openItem)
@@ -50,8 +52,8 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	if isDir || !hasSelection {
 		termItem := menuItem("Open in Terminal", "utilities-terminal")
 		termItem.Connect("activate", func() {
-			dir := tab.Path
-			if isDir && selectedPath != "" {
+			dir := tab.State.Path()
+			if isDir {
 				dir = selectedPath
 			}
 			fileops.OpenTerminal(dir)
@@ -70,51 +72,25 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 
 	addSeparator(menu)
 
-	// Cut
+	// Cut / Copy / Paste
 	cutItem := menuItem("Cut", "edit-cut")
 	cutItem.SetSensitive(hasSelection)
 	cutItem.Connect("activate", func() {
-		tab.App.ClipboardPaths = selectedPaths
-		tab.App.ClipboardCut = true
-		tab.App.Statusbar.ShowMessage(itemCountMsg(len(selectedPaths), "cut to clipboard"))
+		setClipboard(app, selectedPaths, true)
 	})
 	menu.Append(cutItem)
 
-	// Copy
 	copyItem := menuItem("Copy", "edit-copy")
 	copyItem.SetSensitive(hasSelection)
 	copyItem.Connect("activate", func() {
-		tab.App.ClipboardPaths = selectedPaths
-		tab.App.ClipboardCut = false
-		tab.App.Statusbar.ShowMessage(itemCountMsg(len(selectedPaths), "copied to clipboard"))
+		setClipboard(app, selectedPaths, false)
 	})
 	menu.Append(copyItem)
 
-	// Paste
 	pasteItem := menuItem("Paste", "edit-paste")
-	pasteItem.SetSensitive(len(tab.App.ClipboardPaths) > 0)
+	pasteItem.SetSensitive(len(app.Clipboard.Paths) > 0)
 	pasteItem.Connect("activate", func() {
-		dest := tab.Path
-		n := len(tab.App.ClipboardPaths)
-		cut := tab.App.ClipboardCut
-		go func() {
-			fileops.PasteFiles(tab.App.ClipboardPaths, dest, tab.App.ClipboardCut)
-			if cut {
-				tab.App.ClipboardPaths = nil
-				tab.App.ClipboardCut = false
-			}
-			glib_idle_add(func() {
-				tab.FileView.Refresh()
-				if tab.App.Statusbar != nil {
-					tab.App.Statusbar.Update(tab)
-				}
-				if cut {
-					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
-				} else {
-					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "pasted"))
-				}
-			})
-		}()
+		pasteClipboard(app, tab)
 	})
 	menu.Append(pasteItem)
 
@@ -124,14 +100,13 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	if hasSelection {
 		copyPathItem := menuItem("Copy Path", "edit-copy")
 		copyPathItem.Connect("activate", func() {
-			fileops.CopyPathToClipboard(selectedPaths)
-			tab.App.Statusbar.ShowMessage("Path copied to clipboard")
+			copyPathsToClipboard(app, selectedPaths)
 		})
 		menu.Append(copyPathItem)
 	}
 
 	// Rename
-	if len(selectedPaths) == 1 {
+	if selectedPath != "" {
 		renameItem := menuItem("Rename…", "document-edit")
 		renameItem.Connect("activate", func() {
 			ShowRenameDialog(tab, selectedPath)
@@ -140,23 +115,12 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 	}
 
 	// Unzip (for .zip files)
-	if selectedPath != "" && strings.HasSuffix(strings.ToLower(selectedPath), ".zip") {
+	if strings.HasSuffix(strings.ToLower(selectedPath), ".zip") {
 		unzipItem := menuItem("Extract Here", "package-x-generic")
 		unzipItem.Connect("activate", func() {
-			go func() {
-				err := fileops.Unzip(selectedPath, filepath.Dir(selectedPath))
-				glib_idle_add(func() {
-					tab.FileView.Refresh()
-					if tab.App.Statusbar != nil {
-						tab.App.Statusbar.Update(tab)
-						if err == nil {
-							tab.App.Statusbar.ShowMessage("Archive extracted")
-						} else {
-							tab.App.Statusbar.ShowMessage("Extract failed: " + err.Error())
-						}
-					}
-				})
-			}()
+			runFileOp(app, "Archive extracted", func() error {
+				return fileops.Unzip(selectedPath, filepath.Dir(selectedPath))
+			})
 		})
 		menu.Append(unzipItem)
 	}
@@ -172,8 +136,8 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 		menu.Append(deleteItem)
 	}
 
-	// Properties (placeholder)
-	if len(selectedPaths) == 1 {
+	// Properties
+	if selectedPath != "" {
 		addSeparator(menu)
 		propsItem := menuItem("Properties", "document-properties")
 		propsItem.Connect("activate", func() {
@@ -201,13 +165,4 @@ func menuItem(label, iconName string) *gtk.MenuItem {
 func addSeparator(menu *gtk.Menu) {
 	sep, _ := gtk.SeparatorMenuItemNew()
 	menu.Append(sep)
-}
-
-func gtkIdleRefresh(tab *Tab) {
-	glib_idle_add(func() {
-		tab.FileView.Refresh()
-		if tab.App.Statusbar != nil {
-			tab.App.Statusbar.Update(tab)
-		}
-	})
 }

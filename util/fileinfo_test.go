@@ -1,7 +1,6 @@
 package util
 
 import (
-	"os"
 	"testing"
 	"time"
 )
@@ -21,6 +20,7 @@ func TestFormatSize(t *testing.T) {
 		{1572864, "1.5 MB"},
 		{1073741824, "1.0 GB"},
 		{1610612736, "1.5 GB"},
+		{1099511627776, "1.0 TB"},
 	}
 	for _, tt := range tests {
 		got := FormatSize(tt.size)
@@ -46,11 +46,8 @@ func TestFormatDate_ThisYear(t *testing.T) {
 		d = d.AddDate(0, 0, 1)
 	}
 	result := FormatDate(d)
-	if result[:3] != "Jan" && len(result) > 0 {
-		// It should be "Mon DD HH:MM" format, not "Today"
-		if result[:5] == "Today" {
-			t.Errorf("FormatDate for different day this year should not say Today: %q", result)
-		}
+	if result[:5] == "Today" {
+		t.Errorf("FormatDate for different day this year should not say Today: %q", result)
 	}
 	// Should NOT contain a year
 	if len(result) > 12 {
@@ -66,55 +63,29 @@ func TestFormatDate_PastYear(t *testing.T) {
 	}
 }
 
-func TestMimeFromName(t *testing.T) {
+func TestMimeFor(t *testing.T) {
 	tests := []struct {
-		name string
-		want string
+		name  string
+		isDir bool
+		want  string
 	}{
-		{"file.txt", "text/plain"},
-		{"photo.png", "image/png"},
-		{"photo.PNG", "application/octet-stream"}, // case sensitive
-		{"video.mp4", "video/mp4"},
-		{"archive.zip", "application/zip"},
-		{"code.go", "text/x-go"},
-		{"noextension", "application/octet-stream"},
-		{".hidden", "application/octet-stream"},
-		{"file.unknown", "application/octet-stream"},
-		{"document.pdf", "application/pdf"},
-		{"song.mp3", "audio/mpeg"},
+		{"folder", true, "inode/directory"},
+		{"file.txt", false, "text/plain"},
+		{"photo.png", false, "image/png"},
+		{"photo.PNG", false, "image/png"}, // extension match is case-insensitive
+		{"video.mp4", false, "video/mp4"},
+		{"archive.zip", false, "application/zip"},
+		{"code.go", false, "text/x-go"},
+		{"noextension", false, "application/octet-stream"},
+		{".hidden", false, "application/octet-stream"},
+		{"file.unknown", false, "application/octet-stream"},
+		{"document.pdf", false, "application/pdf"},
+		{"song.mp3", false, "audio/mpeg"},
 	}
 	for _, tt := range tests {
-		got := MimeFromName(tt.name)
+		got := MimeFor(tt.name, tt.isDir)
 		if got != tt.want {
-			t.Errorf("MimeFromName(%q) = %q, want %q", tt.name, got, tt.want)
+			t.Errorf("MimeFor(%q, %v) = %q, want %q", tt.name, tt.isDir, got, tt.want)
 		}
-	}
-}
-
-type mockFileInfo struct {
-	name  string
-	isDir bool
-}
-
-func (m mockFileInfo) Name() string      { return m.name }
-func (m mockFileInfo) Size() int64       { return 0 }
-func (m mockFileInfo) Mode() os.FileMode { return 0 }
-func (m mockFileInfo) ModTime() time.Time { return time.Time{} }
-func (m mockFileInfo) IsDir() bool       { return m.isDir }
-func (m mockFileInfo) Sys() interface{}  { return nil }
-
-func TestDetectMimeType_Dir(t *testing.T) {
-	info := mockFileInfo{name: "folder", isDir: true}
-	got := DetectMimeType(info)
-	if got != "inode/directory" {
-		t.Errorf("DetectMimeType(dir) = %q, want 'inode/directory'", got)
-	}
-}
-
-func TestDetectMimeType_File(t *testing.T) {
-	info := mockFileInfo{name: "test.go", isDir: false}
-	got := DetectMimeType(info)
-	if got != "text/x-go" {
-		t.Errorf("DetectMimeType(test.go) = %q, want 'text/x-go'", got)
 	}
 }

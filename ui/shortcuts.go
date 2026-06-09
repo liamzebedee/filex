@@ -1,185 +1,118 @@
 package ui
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/gotk3/gotk3/gdk"
-	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
-
-	"filex/fileops"
 )
 
-// itemCountMsg returns e.g. "3 items moved" or "1 item copied to clipboard".
-func itemCountMsg(n int, action string) string {
-	if n == 1 {
-		return fmt.Sprintf("1 item %s", action)
-	}
-	return fmt.Sprintf("%d items %s", n, action)
+// shortcut maps one key chord to an action on the active tab — a
+// declarative table instead of a switch, so every binding follows the
+// same shape.
+type shortcut struct {
+	key    uint
+	mods   gdk.ModifierType
+	action func(app *App, tab *Tab)
 }
 
-// glib_idle_add schedules a function to run on the GTK main thread.
-func glib_idle_add(fn func()) {
-	glib.IdleAdd(func() bool {
-		fn()
-		return false // don't repeat
-	})
+const (
+	modNone  = gdk.ModifierType(0)
+	modCtrl  = gdk.CONTROL_MASK
+	modShift = gdk.SHIFT_MASK
+	modAlt   = gdk.MOD1_MASK
+)
+
+var windowShortcuts = []shortcut{
+	// Tabs
+	{gdk.KEY_t, modCtrl, func(app *App, tab *Tab) { NewTab(app, tab.State.Path()) }},
+	{gdk.KEY_w, modCtrl, func(app *App, tab *Tab) { tab.Close() }},
+	{gdk.KEY_Tab, modCtrl, func(app *App, tab *Tab) { cycleTab(app, +1) }},
+	{gdk.KEY_Page_Down, modCtrl, func(app *App, tab *Tab) { cycleTab(app, +1) }},
+	{gdk.KEY_ISO_Left_Tab, modCtrl | modShift, func(app *App, tab *Tab) { cycleTab(app, -1) }},
+	{gdk.KEY_Page_Up, modCtrl, func(app *App, tab *Tab) { cycleTab(app, -1) }},
+
+	// Navigation
+	{gdk.KEY_Left, modAlt, func(app *App, tab *Tab) { tab.GoBack() }},
+	{gdk.KEY_Right, modAlt, func(app *App, tab *Tab) { tab.GoForward() }},
+	{gdk.KEY_Up, modAlt, func(app *App, tab *Tab) { tab.GoUp() }},
+	{gdk.KEY_BackSpace, modNone, func(app *App, tab *Tab) { tab.GoBack() }},
+	{gdk.KEY_bracketleft, modCtrl, func(app *App, tab *Tab) { tab.GoBack() }},
+	{gdk.KEY_bracketright, modCtrl, func(app *App, tab *Tab) { tab.GoForward() }},
+	{gdk.KEY_Up, modCtrl, func(app *App, tab *Tab) { tab.GoUp() }},
+	{gdk.KEY_Down, modCtrl, func(app *App, tab *Tab) { tab.FileView.OpenSelected() }},
+	{gdk.KEY_Return, modNone, func(app *App, tab *Tab) { tab.FileView.OpenSelected() }},
+	{gdk.KEY_KP_Enter, modNone, func(app *App, tab *Tab) { tab.FileView.OpenSelected() }},
+	{gdk.KEY_l, modCtrl, func(app *App, tab *Tab) { tab.Toolbar.ShowPathEntry() }},
+
+	// View
+	{gdk.KEY_h, modCtrl, func(app *App, tab *Tab) { tab.ToggleHidden() }},
+	{gdk.KEY_F5, modNone, func(app *App, tab *Tab) { tab.Refresh() }},
+	{gdk.KEY_a, modCtrl, func(app *App, tab *Tab) { tab.FileView.SelectAll() }},
+
+	// File operations
+	{gdk.KEY_c, modCtrl, func(app *App, tab *Tab) { setClipboard(app, tab.FileView.SelectedPaths(), false) }},
+	{gdk.KEY_x, modCtrl, func(app *App, tab *Tab) { setClipboard(app, tab.FileView.SelectedPaths(), true) }},
+	{gdk.KEY_v, modCtrl, func(app *App, tab *Tab) { pasteClipboard(app, tab) }},
+	{gdk.KEY_N, modCtrl | modShift, func(app *App, tab *Tab) { ShowNewFolderDialog(tab) }},
+	{gdk.KEY_F2, modNone, func(app *App, tab *Tab) {
+		if path := tab.FileView.SelectedPath(); path != "" {
+			ShowRenameDialog(tab, path)
+		}
+	}},
+	{gdk.KEY_Delete, modNone, func(app *App, tab *Tab) {
+		if paths := tab.FileView.SelectedPaths(); len(paths) > 0 {
+			ShowDeleteConfirmDialog(tab, paths)
+		}
+	}},
 }
 
-// setupKeyboardShortcuts registers global keyboard shortcuts on the window.
+// setupKeyboardShortcuts registers the shortcut table on the window.
 func setupKeyboardShortcuts(app *App) {
 	app.Window.Connect("key-press-event", func(win *gtk.Window, event *gdk.Event) bool {
-		keyEvent := gdk.EventKeyNewFromEvent(event)
-		key := keyEvent.KeyVal()
-		state := gdk.ModifierType(keyEvent.State()) & gtk.AcceleratorGetDefaultModMask()
-
-		ctrl := state&gdk.CONTROL_MASK != 0
-		shift := state&gdk.SHIFT_MASK != 0
-
 		tab := app.ActiveTab()
-		if tab == nil {
+		if tab == nil || focusInEditable(win) {
 			return false
 		}
 
-		switch {
-		// Ctrl+T: New Tab
-		case ctrl && !shift && key == gdk.KEY_t:
-			NewTab(app, tab.Path)
-			return true
+		keyEvent := gdk.EventKeyNewFromEvent(event)
+		key := keyEvent.KeyVal()
+		mods := gdk.ModifierType(keyEvent.State()) & gtk.AcceleratorGetDefaultModMask()
 
-		// Ctrl+W: Close Tab
-		case ctrl && !shift && key == gdk.KEY_w:
-			tab.Close()
-			return true
-
-		// Ctrl+Tab / Ctrl+Page_Down: Next Tab
-		case ctrl && !shift && (key == gdk.KEY_Tab || key == gdk.KEY_Page_Down):
-			page := app.Notebook.GetCurrentPage()
-			if page < app.Notebook.GetNPages()-1 {
-				app.Notebook.SetCurrentPage(page + 1)
-			} else {
-				app.Notebook.SetCurrentPage(0)
+		for _, s := range windowShortcuts {
+			if s.key == key && s.mods == mods {
+				s.action(app, tab)
+				return true
 			}
-			return true
-
-		// Ctrl+Shift+Tab / Ctrl+Page_Up: Previous Tab
-		case ctrl && shift && key == gdk.KEY_ISO_Left_Tab,
-			ctrl && !shift && key == gdk.KEY_Page_Up:
-			page := app.Notebook.GetCurrentPage()
-			if page > 0 {
-				app.Notebook.SetCurrentPage(page - 1)
-			} else {
-				app.Notebook.SetCurrentPage(app.Notebook.GetNPages() - 1)
-			}
-			return true
-
-		// Ctrl+L: Focus path entry
-		case ctrl && !shift && key == gdk.KEY_l:
-			tab.Toolbar.ShowPathEntry()
-			return true
-
-		// Ctrl+H: Toggle hidden files
-		case ctrl && !shift && key == gdk.KEY_h:
-			tab.ToggleHidden()
-			return true
-
-		// F2: Rename
-		case key == gdk.KEY_F2:
-			if path := tab.FileView.SelectedPath(); path != "" {
-				ShowRenameDialog(tab, path)
-			}
-			return true
-
-		// Delete: Move to trash
-		case key == gdk.KEY_Delete:
-			paths := tab.FileView.SelectedPaths()
-			if len(paths) > 0 {
-				ShowDeleteConfirmDialog(tab, paths)
-			}
-			return true
-
-		// Ctrl+C: Copy
-		case ctrl && !shift && key == gdk.KEY_c:
-			paths := tab.FileView.SelectedPaths()
-			if len(paths) > 0 {
-				app.ClipboardPaths = paths
-				app.ClipboardCut = false
-				app.Statusbar.ShowMessage(itemCountMsg(len(paths), "copied to clipboard"))
-			}
-			return true
-
-		// Ctrl+X: Cut
-		case ctrl && !shift && key == gdk.KEY_x:
-			paths := tab.FileView.SelectedPaths()
-			if len(paths) > 0 {
-				app.ClipboardPaths = paths
-				app.ClipboardCut = true
-				app.Statusbar.ShowMessage(itemCountMsg(len(paths), "cut to clipboard"))
-			}
-			return true
-
-		// Ctrl+V: Paste
-		case ctrl && !shift && key == gdk.KEY_v:
-			if len(app.ClipboardPaths) > 0 {
-				n := len(app.ClipboardPaths)
-				cut := app.ClipboardCut
-				go func() {
-					PasteAndRefresh(app, tab)
-					glib_idle_add(func() {
-						if cut {
-							app.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
-						} else {
-							app.Statusbar.ShowMessage(itemCountMsg(n, "pasted"))
-						}
-					})
-				}()
-			}
-			return true
-
-		// Alt+Left: Back
-		case state&gdk.MOD1_MASK != 0 && key == gdk.KEY_Left:
-			tab.GoBack()
-			return true
-
-		// Alt+Right: Forward
-		case state&gdk.MOD1_MASK != 0 && key == gdk.KEY_Right:
-			tab.GoForward()
-			return true
-
-		// Alt+Up: Parent directory
-		case state&gdk.MOD1_MASK != 0 && key == gdk.KEY_Up:
-			tab.GoUp()
-			return true
-
-		// Backspace: Go back
-		case key == gdk.KEY_BackSpace:
-			tab.GoBack()
-			return true
-
-		// Ctrl+Shift+N: New folder
-		case ctrl && shift && key == gdk.KEY_N:
-			ShowNewFolderDialog(tab)
-			return true
-
-		// F5: Refresh
-		case key == gdk.KEY_F5:
-			tab.FileView.Refresh()
-			if app.Statusbar != nil {
-				app.Statusbar.Update(tab)
-			}
-			return true
 		}
-
 		return false
 	})
 }
 
-// PasteAndRefresh handles paste operation with UI refresh.
-func PasteAndRefresh(app *App, tab *Tab) {
-	fileops.PasteFiles(app.ClipboardPaths, tab.Path, app.ClipboardCut)
-	if app.ClipboardCut {
-		app.ClipboardPaths = nil
-		app.ClipboardCut = false
+// focusInEditable reports whether keyboard focus is in a text-editing
+// widget. Global shortcuts must not steal keys (Backspace, Enter, Ctrl+A,
+// Ctrl+C…) from the path or search entries.
+func focusInEditable(win *gtk.Window) bool {
+	focused, err := win.GetFocus()
+	if err != nil || focused == nil {
+		return false
 	}
-	gtkIdleRefresh(tab)
+	w := focused.ToWidget()
+	if w == nil {
+		return false
+	}
+	// With no explicit widget name set, GetName returns the type name,
+	// e.g. "GtkEntry" or "GtkSearchEntry".
+	name, err := w.GetName()
+	return err == nil && strings.Contains(name, "Entry")
+}
+
+// cycleTab moves the active notebook page by delta, wrapping around.
+func cycleTab(app *App, delta int) {
+	n := app.Notebook.GetNPages()
+	if n == 0 {
+		return
+	}
+	page := (app.Notebook.GetCurrentPage() + delta + n) % n
+	app.Notebook.SetCurrentPage(page)
 }

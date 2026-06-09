@@ -2,36 +2,39 @@ package ui
 
 import (
 	"log"
-	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 
+	"filex/core"
 	"filex/fileops"
 	"filex/util"
 )
 
-// ListStore columns
+// ListStore columns. The store is a write-only render target: it holds
+// display strings only, and reads go through entryAt into the rendered
+// slice instead.
 const (
-	colIcon    = 0 // string (icon name)
-	colName    = 1 // string
-	colSize    = 2 // string (formatted)
-	colDate    = 3 // string (formatted)
-	colPath    = 4 // string (full path)
-	colIsDir   = 5 // bool
-	colSizeRaw = 6 // int64 (for sorting)
-	colDateRaw = 7 // int64 (for sorting)
+	colIcon = iota // icon name
+	colName
+	colSize // formatted
+	colDate // formatted
 )
 
-// globalDragPaths holds paths being dragged across any FileView.
-// This is global because the source and destination FileView are different instances.
+// globalDragPaths holds paths being dragged across any FileView. It is
+// global because the source and destination FileView are different
+// instances (gotk3's SelectionData is broken, so data can't ride along
+// with the drag itself).
 var globalDragPaths []string
 
-// FileView manages both list and icon views with a shared ListStore.
+// FileView renders a tab's visible entries as both a list and an icon
+// grid over one shared ListStore. rendered mirrors the store row-for-row
+// and is the slice all reads (selection, activation, drops) resolve
+// against.
 type FileView struct {
 	Tab       *Tab
 	ScrollWin *gtk.ScrolledWindow
@@ -39,11 +42,13 @@ type FileView struct {
 	TreeView  *gtk.TreeView
 	IconView  *gtk.IconView
 	Store     *gtk.ListStore
-	Entries   []fileops.FileEntry
+
+	rendered []core.FileEntry
+	sortCols map[core.SortKey]*gtk.TreeViewColumn
 }
 
 func NewFileView(tab *Tab) *FileView {
-	fv := &FileView{Tab: tab}
+	fv := &FileView{Tab: tab, sortCols: make(map[core.SortKey]*gtk.TreeViewColumn)}
 
 	var err error
 	fv.ScrollWin, err = gtk.ScrolledWindowNew(nil, nil)
@@ -52,16 +57,11 @@ func NewFileView(tab *Tab) *FileView {
 	}
 	fv.ScrollWin.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
 
-	// Shared ListStore: icon, name, size, date, path, isDir, sizeRaw, dateRaw
 	fv.Store, err = gtk.ListStoreNew(
-		glib.TYPE_STRING,  // icon name
-		glib.TYPE_STRING,  // name
-		glib.TYPE_STRING,  // size (formatted)
-		glib.TYPE_STRING,  // date (formatted)
-		glib.TYPE_STRING,  // full path
-		glib.TYPE_BOOLEAN, // isDir
-		glib.TYPE_INT64,   // size raw
-		glib.TYPE_INT64,   // date raw
+		glib.TYPE_STRING, // icon name
+		glib.TYPE_STRING, // name
+		glib.TYPE_STRING, // size (formatted)
+		glib.TYPE_STRING, // date (formatted)
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -80,16 +80,80 @@ func NewFileView(tab *Tab) *FileView {
 
 	fv.Stack.AddNamed(fv.TreeView, "list")
 	fv.Stack.AddNamed(fv.IconView, "icon")
+	fv.ScrollWin.Add(fv.Stack)
 
-	if tab.ViewMode == IconMode {
+	return fv
+}
+
+// Render syncs the views to the visible entries. The store is repopulated
+// only when the entries actually changed; view mode and sort indicators
+// are cheap and sync unconditionally.
+func (fv *FileView) Render(visible []core.FileEntry, s core.TabState) {
+	if !slices.Equal(fv.rendered, visible) {
+		fv.populateStore(visible)
+		fv.rendered = visible
+	}
+
+	if s.ViewMode == core.IconMode {
 		fv.Stack.SetVisibleChildName("icon")
 	} else {
 		fv.Stack.SetVisibleChildName("list")
 	}
 
-	fv.ScrollWin.Add(fv.Stack)
+	for key, col := range fv.sortCols {
+		col.SetSortIndicator(key == s.SortKey)
+		if key == s.SortKey {
+			if s.SortAsc {
+				col.SetSortOrder(gtk.SORT_ASCENDING)
+			} else {
+				col.SetSortOrder(gtk.SORT_DESCENDING)
+			}
+		}
+	}
+}
 
-	return fv
+// populateStore rewrites the store from the given entries. It is the only
+// writer; nothing ever reads the store back.
+func (fv *FileView) populateStore(entries []core.FileEntry) {
+	fv.Store.Clear()
+	for _, e := range entries {
+		sizeStr := ""
+		if !e.IsDir {
+			sizeStr = util.FormatSize(e.Size)
+		}
+		fv.Store.Set(fv.Store.Append(),
+			[]int{colIcon, colName, colSize, colDate},
+			[]interface{}{
+				util.IconForMime(util.MimeFor(e.Name, e.IsDir)),
+				e.Name,
+				sizeStr,
+				util.FormatDate(time.Unix(e.ModTime, 0)),
+			},
+		)
+	}
+}
+
+// entryAt maps a tree path back to its entry through the rendered slice.
+func (fv *FileView) entryAt(tp *gtk.TreePath) (core.FileEntry, bool) {
+	idx := tp.GetIndices()
+	if len(idx) == 0 || idx[0] < 0 || idx[0] >= len(fv.rendered) {
+		return core.FileEntry{}, false
+	}
+	return fv.rendered[idx[0]], true
+}
+
+// activateRow opens the entry at the given tree path: directories
+// navigate, files open with their default application.
+func (fv *FileView) activateRow(tp *gtk.TreePath) {
+	e, ok := fv.entryAt(tp)
+	if !ok {
+		return
+	}
+	if e.IsDir {
+		fv.Tab.NavigateTo(e.Path)
+	} else {
+		fileops.OpenFile(e.Path)
+	}
 }
 
 func (fv *FileView) buildTreeView() {
@@ -109,12 +173,9 @@ func (fv *FileView) buildTreeView() {
 	sel.SetMode(gtk.SELECTION_MULTIPLE)
 
 	// Column: Icon + Name
-	nameCol, _ := gtk.TreeViewColumnNew()
-	nameCol.SetTitle("Name")
+	nameCol := fv.newSortColumn("Name", core.SortByName)
 	nameCol.SetExpand(true)
-	nameCol.SetResizable(true)
 	nameCol.SetMinWidth(200)
-	nameCol.SetSortColumnID(colName)
 
 	iconRenderer, _ := gtk.CellRendererPixbufNew()
 	nameCol.PackStart(iconRenderer, false)
@@ -127,22 +188,16 @@ func (fv *FileView) buildTreeView() {
 	fv.TreeView.AppendColumn(nameCol)
 
 	// Column: Size
-	sizeCol, _ := gtk.TreeViewColumnNew()
-	sizeCol.SetTitle("Size")
-	sizeCol.SetResizable(true)
+	sizeCol := fv.newSortColumn("Size", core.SortBySize)
 	sizeCol.SetMinWidth(80)
-	sizeCol.SetSortColumnID(colSizeRaw)
 	sizeRenderer, _ := gtk.CellRendererTextNew()
 	sizeCol.PackStart(sizeRenderer, true)
 	sizeCol.AddAttribute(sizeRenderer, "text", colSize)
 	fv.TreeView.AppendColumn(sizeCol)
 
 	// Column: Modified
-	dateCol, _ := gtk.TreeViewColumnNew()
-	dateCol.SetTitle("Modified")
-	dateCol.SetResizable(true)
+	dateCol := fv.newSortColumn("Modified", core.SortByDate)
 	dateCol.SetMinWidth(120)
-	dateCol.SetSortColumnID(colDateRaw)
 	dateRenderer, _ := gtk.CellRendererTextNew()
 	dateCol.PackStart(dateRenderer, true)
 	dateCol.AddAttribute(dateRenderer, "text", colDate)
@@ -157,15 +212,14 @@ func (fv *FileView) buildTreeView() {
 	fv.TreeView.Connect("button-press-event", func(tv *gtk.TreeView, event *gdk.Event) bool {
 		btnEvent := gdk.EventButtonNewFromEvent(event)
 		if btnEvent.Button() == gdk.BUTTON_SECONDARY {
-			fv.showContextMenu(btnEvent)
+			ShowContextMenu(fv.Tab, btnEvent)
 			return true
 		}
 		return false
 	})
 
-	// DnD: Use EnableModelDragSource/Dest so GTK handles row-level drag and drop.
-	// We use a dummy target and never touch SelectionData (it's broken in gotk3).
-	// Instead we use globalDragPaths to pass data between drag-begin and drag-drop.
+	// DnD: Use EnableModelDragSource/Dest so GTK handles row-level drag and
+	// drop. The target is a dummy — data travels via globalDragPaths.
 	rowTarget, _ := gtk.TargetEntryNew("GTK_TREE_MODEL_ROW", gtk.TARGET_SAME_WIDGET, 0)
 	crossTarget, _ := gtk.TargetEntryNew("GTK_TREE_MODEL_ROW", gtk.TARGET_SAME_APP, 1)
 	targets := []gtk.TargetEntry{*rowTarget, *crossTarget}
@@ -175,65 +229,37 @@ func (fv *FileView) buildTreeView() {
 
 	fv.TreeView.Connect("drag-begin", func(tv *gtk.TreeView, ctx *gdk.DragContext) {
 		globalDragPaths = fv.SelectedPaths()
-		log.Printf("[DnD] TreeView drag-begin: %d paths: %v", len(globalDragPaths), globalDragPaths)
 	})
 
-	// drag-drop: the actual drop event. We handle it entirely via globalDragPaths.
 	fv.TreeView.Connect("drag-drop", func(tv *gtk.TreeView, ctx *gdk.DragContext, x, y int, tm uint32) bool {
-		log.Printf("[DnD] TreeView drag-drop at (%d,%d), globalDragPaths=%d", x, y, len(globalDragPaths))
-		if len(globalDragPaths) == 0 {
-			return false
-		}
-
-		// Determine drop target: which row are we over?
-		destDir := fv.Tab.Path // default: drop into current directory
-		treePath, pos, ok := fv.TreeView.GetDestRowAtPos(x, y)
-		if ok && treePath != nil {
-			log.Printf("[DnD]   drop on row %s, pos=%v", treePath.String(), pos)
-			iter, err := fv.Store.GetIter(treePath)
-			if err == nil {
-				isDir, _ := getBoolFromStore(fv.Store, iter, colIsDir)
-				if isDir && (pos == gtk.TREE_VIEW_DROP_INTO_OR_BEFORE || pos == gtk.TREE_VIEW_DROP_INTO_OR_AFTER) {
-					rowPath, _ := getStringFromStore(fv.Store, iter, colPath)
-					destDir = rowPath
-					log.Printf("[DnD]   dropping INTO folder: %s", destDir)
-				}
-			}
-		} else {
-			log.Printf("[DnD]   drop on empty area, using current dir: %s", destDir)
-		}
-
-		sources := make([]string, 0, len(globalDragPaths))
-		for _, p := range globalDragPaths {
-			if filepath.Dir(p) != destDir {
-				sources = append(sources, p)
+		// Drop into the folder row under the cursor, else the current dir.
+		destDir := fv.Tab.State.Path()
+		if tp, pos, ok := fv.TreeView.GetDestRowAtPos(x, y); ok && tp != nil {
+			onto := pos == gtk.TREE_VIEW_DROP_INTO_OR_BEFORE || pos == gtk.TREE_VIEW_DROP_INTO_OR_AFTER
+			if e, ok := fv.entryAt(tp); ok && e.IsDir && onto {
+				destDir = e.Path
 			}
 		}
-		globalDragPaths = nil
-
-		log.Printf("[DnD]   moving %d files -> %s", len(sources), destDir)
-		if len(sources) > 0 {
-			n := len(sources)
-			go func() {
-				err := fileops.PasteFiles(sources, destDir, true)
-				log.Printf("[DnD]   PasteFiles result: err=%v", err)
-				glib_idle_add(func() {
-					fv.Refresh()
-					fv.refreshAllTabs()
-					if fv.Tab.App.Statusbar != nil {
-						fv.Tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
-					}
-				})
-			}()
-		}
-
-		return true
+		return fv.dropDragged(destDir)
 	})
 
 	fv.TreeView.Connect("drag-end", func(tv *gtk.TreeView, ctx *gdk.DragContext) {
-		log.Printf("[DnD] TreeView drag-end")
 		globalDragPaths = nil
 	})
+}
+
+// newSortColumn creates a clickable column that dispatches the given sort
+// key; the indicator is rendered from state in Render.
+func (fv *FileView) newSortColumn(title string, key core.SortKey) *gtk.TreeViewColumn {
+	col, _ := gtk.TreeViewColumnNew()
+	col.SetTitle(title)
+	col.SetResizable(true)
+	col.SetClickable(true)
+	col.Connect("clicked", func() {
+		fv.Tab.SetSort(key)
+	})
+	fv.sortCols[key] = col
+	return col
 }
 
 func (fv *FileView) buildIconView() {
@@ -256,26 +282,24 @@ func (fv *FileView) buildIconView() {
 		fv.activateRow(path)
 	})
 
-	// Handle double-click before DnD can intercept it, and right-click for context menu
+	// Handle double-click before DnD can intercept it, and right-click for
+	// the context menu.
 	fv.IconView.Connect("button-press-event", func(iv *gtk.IconView, event *gdk.Event) bool {
 		btnEvent := gdk.EventButtonNewFromEvent(event)
 		if btnEvent.Button() == gdk.BUTTON_SECONDARY {
-			fv.showContextMenu(btnEvent)
+			ShowContextMenu(fv.Tab, btnEvent)
 			return true
 		}
 		if btnEvent.Button() == gdk.BUTTON_PRIMARY && btnEvent.Type() == gdk.EVENT_DOUBLE_BUTTON_PRESS {
-			x := int(btnEvent.X())
-			y := int(btnEvent.Y())
-			path := fv.IconView.GetPathAtPos(x, y)
-			if path != nil {
-				fv.activateRow(path)
+			if tp := fv.IconView.GetPathAtPos(int(btnEvent.X()), int(btnEvent.Y())); tp != nil {
+				fv.activateRow(tp)
 				return true
 			}
 		}
 		return false
 	})
 
-	// IconView DnD: use widget-level drag source + dest on the same widget
+	// IconView DnD: widget-level drag source + dest on the same widget
 	ivTarget, _ := gtk.TargetEntryNew("FILEX_INTERNAL", gtk.TARGET_SAME_APP, 0)
 	ivTargets := []gtk.TargetEntry{*ivTarget}
 	fv.IconView.ToWidget().DragSourceSet(gdk.BUTTON1_MASK, ivTargets, gdk.ACTION_MOVE)
@@ -283,147 +307,72 @@ func (fv *FileView) buildIconView() {
 
 	fv.IconView.Connect("drag-begin", func(iv *gtk.IconView, ctx *gdk.DragContext) {
 		globalDragPaths = fv.SelectedPaths()
-		log.Printf("[DnD] IconView drag-begin: %d paths: %v", len(globalDragPaths), globalDragPaths)
 	})
 
 	fv.IconView.Connect("drag-drop", func(iv *gtk.IconView, ctx *gdk.DragContext, x, y int, tm uint32) bool {
-		log.Printf("[DnD] IconView drag-drop at (%d,%d), globalDragPaths=%d", x, y, len(globalDragPaths))
-		if len(globalDragPaths) == 0 {
-			return false
-		}
-		destDir := fv.Tab.Path
-		// Check if dropped on a folder icon
-		treePath := fv.IconView.GetPathAtPos(x, y)
-		if treePath != nil {
-			iter, err := fv.Store.GetIter(treePath)
-			if err == nil {
-				isDir, _ := getBoolFromStore(fv.Store, iter, colIsDir)
-				if isDir {
-					rowPath, _ := getStringFromStore(fv.Store, iter, colPath)
-					destDir = rowPath
-					log.Printf("[DnD]   IconView drop on folder: %s", destDir)
-				}
+		destDir := fv.Tab.State.Path()
+		if tp := fv.IconView.GetPathAtPos(x, y); tp != nil {
+			if e, ok := fv.entryAt(tp); ok && e.IsDir {
+				destDir = e.Path
 			}
 		}
-
-		sources := make([]string, 0, len(globalDragPaths))
-		for _, p := range globalDragPaths {
-			if filepath.Dir(p) != destDir {
-				sources = append(sources, p)
-			}
-		}
-		globalDragPaths = nil
-
-		log.Printf("[DnD]   IconView moving %d files -> %s", len(sources), destDir)
-		if len(sources) > 0 {
-			n := len(sources)
-			go func() {
-				err := fileops.PasteFiles(sources, destDir, true)
-				log.Printf("[DnD]   PasteFiles result: err=%v", err)
-				glib_idle_add(func() {
-					fv.Refresh()
-					fv.refreshAllTabs()
-					if fv.Tab.App.Statusbar != nil {
-						fv.Tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved"))
-					}
-				})
-			}()
-		}
-		return true
+		return fv.dropDragged(destDir)
 	})
 
 	fv.IconView.Connect("drag-end", func(iv *gtk.IconView, ctx *gdk.DragContext) {
-		log.Printf("[DnD] IconView drag-end")
 		globalDragPaths = nil
 	})
 }
 
-// refreshAllTabs refreshes all open tabs (useful after file move operations).
-func (fv *FileView) refreshAllTabs() {
-	app := fv.Tab.App
-	for _, tab := range tabRegistry {
-		if tab != fv.Tab {
-			tab.FileView.Refresh()
+// dropDragged moves the dragged paths into destDir, skipping paths already
+// there, and clears the drag state.
+func (fv *FileView) dropDragged(destDir string) bool {
+	sources := make([]string, 0, len(globalDragPaths))
+	for _, p := range globalDragPaths {
+		if filepath.Dir(p) != destDir {
+			sources = append(sources, p)
 		}
 	}
-	if app.Statusbar != nil {
-		app.Statusbar.Update(fv.Tab)
+	globalDragPaths = nil
+	if len(sources) == 0 {
+		return false
 	}
+	runFileOp(fv.Tab.App, itemCountMsg(len(sources), "moved"), func() error {
+		return fileops.PasteFiles(sources, destDir, true)
+	})
+	return true
 }
 
-func (fv *FileView) activateRow(path *gtk.TreePath) {
-	iter, err := fv.Store.GetIter(path)
-	if err != nil {
-		return
+// selectedItems returns the tree paths of the current selection in the
+// active view.
+func (fv *FileView) selectedItems() []*gtk.TreePath {
+	var items []*gtk.TreePath
+	collect := func(item interface{}) {
+		if tp, ok := item.(*gtk.TreePath); ok {
+			items = append(items, tp)
+		}
 	}
-	filePath, _ := getStringFromStore(fv.Store, iter, colPath)
-	isDir, _ := getBoolFromStore(fv.Store, iter, colIsDir)
-
-	if isDir {
-		fv.Tab.NavigateAndPush(filePath)
-	} else {
-		go exec.Command("xdg-open", filePath).Start()
-	}
-}
-
-func (fv *FileView) showContextMenu(event *gdk.EventButton) {
-	ShowContextMenu(fv.Tab, event)
-}
-
-// Refresh reloads directory contents into the store.
-func (fv *FileView) Refresh() {
-	entries, err := fileops.ListDirectory(fv.Tab.Path, fv.Tab.ShowHidden)
-	if err != nil {
-		log.Printf("Error reading directory %s: %v", fv.Tab.Path, err)
-		return
-	}
-
-	fileops.SortEntries(entries, fv.Tab.SortColumn, fv.Tab.SortAsc)
-	fv.Entries = entries
-	fv.populateStore(entries)
-}
-
-// SwitchView toggles between list and icon view modes.
-func (fv *FileView) SwitchView(mode ViewMode) {
-	if mode == IconMode {
-		fv.Stack.SetVisibleChildName("icon")
-	} else {
-		fv.Stack.SetVisibleChildName("list")
-	}
-}
-
-// SelectedPaths returns paths of all selected files.
-func (fv *FileView) SelectedPaths() []string {
-	var paths []string
-
-	if fv.Tab.ViewMode == ListMode {
+	if fv.Tab.State.ViewMode == core.ListMode {
 		sel, err := fv.TreeView.GetSelection()
 		if err != nil {
 			return nil
 		}
-		rows := sel.GetSelectedRows(fv.Store)
-		rows.Foreach(func(item interface{}) {
-			path := item.(*gtk.TreePath)
-			iter, err := fv.Store.GetIter(path)
-			if err != nil {
-				return
-			}
-			p, _ := getStringFromStore(fv.Store, iter, colPath)
-			paths = append(paths, p)
-		})
+		sel.GetSelectedRows(fv.Store).Foreach(collect)
 	} else {
-		selectedItems := fv.IconView.GetSelectedItems()
-		selectedItems.Foreach(func(item interface{}) {
-			path := item.(*gtk.TreePath)
-			iter, err := fv.Store.GetIter(path)
-			if err != nil {
-				return
-			}
-			p, _ := getStringFromStore(fv.Store, iter, colPath)
-			paths = append(paths, p)
-		})
+		fv.IconView.GetSelectedItems().Foreach(collect)
 	}
+	return items
+}
 
+// SelectedPaths returns the filesystem paths of all selected entries.
+func (fv *FileView) SelectedPaths() []string {
+	items := fv.selectedItems()
+	paths := make([]string, 0, len(items))
+	for _, tp := range items {
+		if e, ok := fv.entryAt(tp); ok {
+			paths = append(paths, e.Path)
+		}
+	}
 	return paths
 }
 
@@ -436,66 +385,23 @@ func (fv *FileView) SelectedPath() string {
 	return ""
 }
 
-func getStringFromStore(store *gtk.ListStore, iter *gtk.TreeIter, col int) (string, error) {
-	val, err := store.GetValue(iter, col)
-	if err != nil {
-		return "", err
-	}
-	return val.GetString()
-}
-
-func getBoolFromStore(store *gtk.ListStore, iter *gtk.TreeIter, col int) (bool, error) {
-	val, err := store.GetValue(iter, col)
-	if err != nil {
-		return false, err
-	}
-	v, err := val.GoValue()
-	if err != nil {
-		return false, err
-	}
-	b, ok := v.(bool)
-	if !ok {
-		return false, nil
-	}
-	return b, nil
-}
-
-// fakeFileInfo adapts FileEntry to os.FileInfo for mime detection.
-type fakeFileInfo struct {
-	entry fileops.FileEntry
-}
-
-func (f fakeFileInfo) Name() string       { return f.entry.Name }
-func (f fakeFileInfo) IsDir() bool        { return f.entry.IsDir }
-func (f fakeFileInfo) Size() int64        { return f.entry.Size }
-func (f fakeFileInfo) Mode() os.FileMode  { return f.entry.Mode }
-func (f fakeFileInfo) ModTime() time.Time { return time.Unix(f.entry.ModTime, 0) }
-func (f fakeFileInfo) Sys() interface{}   { return nil }
-
-// populateStore fills the ListStore with the given entries.
-func (fv *FileView) populateStore(entries []fileops.FileEntry) {
-	fv.Store.Clear()
-	for _, e := range entries {
-		iter := fv.Store.Append()
-		mime := util.DetectMimeType(fakeFileInfo{e})
-		icon := util.IconForMime(mime)
-		sizeStr := ""
-		if !e.IsDir {
-			sizeStr = util.FormatSize(e.Size)
+// SelectAll selects every item in the active view.
+func (fv *FileView) SelectAll() {
+	if fv.Tab.State.ViewMode == core.ListMode {
+		sel, err := fv.TreeView.GetSelection()
+		if err != nil {
+			return
 		}
-		dateStr := util.FormatDate(time.Unix(e.ModTime, 0))
-		fv.Store.Set(iter,
-			[]int{colIcon, colName, colSize, colDate, colPath, colIsDir, colSizeRaw, colDateRaw},
-			[]interface{}{icon, e.Name, sizeStr, dateStr, e.Path, e.IsDir, e.Size, e.ModTime},
-		)
+		sel.SelectAll()
+	} else {
+		fv.IconView.SelectAll()
 	}
 }
 
-// GetSelectedName returns the name of the first selected file
-func (fv *FileView) GetSelectedName() string {
-	p := fv.SelectedPath()
-	if p == "" {
-		return ""
+// OpenSelected activates the single selected item (opens folder or file).
+func (fv *FileView) OpenSelected() {
+	items := fv.selectedItems()
+	if len(items) == 1 {
+		fv.activateRow(items[0])
 	}
-	return filepath.Base(p)
 }

@@ -8,7 +8,14 @@ import (
 	"github.com/gotk3/gotk3/gtk"
 )
 
-// App holds the global application state.
+// Clipboard holds paths staged by Copy/Cut for a later Paste.
+type Clipboard struct {
+	Paths []string
+	Cut   bool
+}
+
+// App holds the global application state: the window chrome and the
+// clipboard. Per-tab state lives in each Tab.
 type App struct {
 	Window    *gtk.Window
 	MainBox   *gtk.Box
@@ -16,9 +23,7 @@ type App struct {
 	Sidebar   *Sidebar
 	Statusbar *Statusbar
 
-	// Clipboard state for copy/cut/paste
-	ClipboardPaths []string
-	ClipboardCut   bool
+	Clipboard Clipboard
 }
 
 func NewApp() *App {
@@ -68,12 +73,7 @@ func (a *App) ActiveTab() *Tab {
 	if err != nil || widget == nil {
 		return nil
 	}
-	w := widget.ToWidget()
-	tab, ok := tabRegistry[w.Native()]
-	if !ok {
-		return nil
-	}
-	return tab
+	return tabRegistry[widget.ToWidget().Native()]
 }
 
 // GetStartPath returns the path to open on launch (argument or home).

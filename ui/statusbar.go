@@ -1,13 +1,14 @@
 package ui
 
 import (
-	"fmt"
 	"log"
 	"time"
 
 	"github.com/gotk3/gotk3/glib"
 	"github.com/gotk3/gotk3/gtk"
 	"golang.org/x/sys/unix"
+
+	"filex/util"
 )
 
 // Statusbar shows item count, feedback messages, and free disk space.
@@ -47,6 +48,9 @@ func NewStatusbar() *Statusbar {
 
 // ShowMessage displays a temporary feedback message in the statusbar.
 func (sb *Statusbar) ShowMessage(msg string) {
+	if sb == nil {
+		return
+	}
 	sb.MsgLabel.SetText(msg)
 	sb.msgExpiry = time.Now().Add(4 * time.Second)
 	glib.TimeoutAdd(4000, func() bool {
@@ -58,45 +62,18 @@ func (sb *Statusbar) ShowMessage(msg string) {
 	})
 }
 
-// Update refreshes the statusbar for the given tab.
-func (sb *Statusbar) Update(tab *Tab) {
-	if tab == nil {
+// Render shows the visible item count and the free space for path.
+func (sb *Statusbar) Render(path string, count int) {
+	if sb == nil {
 		return
 	}
-	count := len(tab.FileView.Entries)
-	if count == 1 {
-		sb.ItemLabel.SetText("1 item")
-	} else {
-		sb.ItemLabel.SetText(fmt.Sprintf("%d items", count))
-	}
+	sb.ItemLabel.SetText(itemCount(count))
 
-	// Free space
 	var stat unix.Statfs_t
-	if err := unix.Statfs(tab.Path, &stat); err == nil {
-		free := stat.Bavail * uint64(stat.Bsize)
-		sb.SpaceLabel.SetText(fmt.Sprintf("Free space: %s", formatBytes(free)))
+	if err := unix.Statfs(path, &stat); err == nil {
+		free := int64(stat.Bavail) * stat.Bsize
+		sb.SpaceLabel.SetText("Free space: " + util.FormatSize(free))
 	} else {
 		sb.SpaceLabel.SetText("")
-	}
-}
-
-func formatBytes(b uint64) string {
-	const (
-		KB = 1024
-		MB = KB * 1024
-		GB = MB * 1024
-		TB = GB * 1024
-	)
-	switch {
-	case b >= TB:
-		return fmt.Sprintf("%.1f TB", float64(b)/float64(TB))
-	case b >= GB:
-		return fmt.Sprintf("%.1f GB", float64(b)/float64(GB))
-	case b >= MB:
-		return fmt.Sprintf("%.1f MB", float64(b)/float64(MB))
-	case b >= KB:
-		return fmt.Sprintf("%.1f KB", float64(b)/float64(KB))
-	default:
-		return fmt.Sprintf("%d bytes", b)
 	}
 }

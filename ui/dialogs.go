@@ -14,82 +14,68 @@ import (
 
 // ShowRenameDialog displays a dialog to rename a file.
 func ShowRenameDialog(tab *Tab, filePath string) {
-	dialog, _ := gtk.DialogNewWithButtons(
-		"Rename",
-		tab.App.Window,
-		gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
-		[]interface{}{"Cancel", gtk.RESPONSE_CANCEL},
-		[]interface{}{"Rename", gtk.RESPONSE_OK},
-	)
-	dialog.SetDefaultSize(350, -1)
-
-	// Mark OK button as suggested
-	okBtnW, err := dialog.GetWidgetForResponse(gtk.RESPONSE_OK)
-	if err == nil {
-		sc, _ := okBtnW.ToWidget().GetStyleContext()
-		sc.AddClass("suggested-action")
-	}
-
-	contentArea, _ := dialog.GetContentArea()
-	box, _ := gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 8)
-	box.SetMarginTop(12)
-	box.SetMarginBottom(12)
-	box.SetMarginStart(12)
-	box.SetMarginEnd(12)
-
-	label, _ := gtk.LabelNew("Enter new name:")
-	label.SetHAlign(gtk.ALIGN_START)
-	box.PackStart(label, false, false, 0)
-
-	entry, _ := gtk.EntryNew()
 	oldName := filepath.Base(filePath)
-	entry.SetText(oldName)
-
-	// Select name without extension
-	ext := filepath.Ext(oldName)
-	nameWithoutExt := strings.TrimSuffix(oldName, ext)
-	entry.SetActivatesDefault(true)
-	box.PackStart(entry, false, false, 0)
-
-	contentArea.PackStart(box, true, true, 0)
-	dialog.SetDefaultResponse(gtk.RESPONSE_OK)
-	dialog.ShowAll()
-
-	// Select the name part (without extension) after showing
-	entry.GrabFocus()
-	entry.SelectRegion(0, len(nameWithoutExt))
-
-	response := dialog.Run()
-	if response == gtk.RESPONSE_OK {
-		newName, _ := entry.GetText()
-		newName = strings.TrimSpace(newName)
-		if newName != "" && newName != oldName {
-			dir := filepath.Dir(filePath)
-			newPath := filepath.Join(dir, newName)
-			if err := fileops.Rename(filePath, newPath); err != nil {
-				showErrorDialog(tab.App.Window, "Rename Failed", err.Error())
-			} else {
-				tab.FileView.Refresh()
-			}
-		}
+	newName, ok := runEntryDialog(tab.App.Window, entryDialogSpec{
+		title:      "Rename",
+		label:      "Enter new name:",
+		initial:    oldName,
+		confirm:    "Rename",
+		selectStem: true,
+	})
+	if !ok || newName == "" || newName == oldName {
+		return
 	}
-	dialog.Destroy()
+	newPath := filepath.Join(filepath.Dir(filePath), newName)
+	if err := fileops.Rename(filePath, newPath); err != nil {
+		showErrorDialog(tab.App.Window, "Rename Failed", err.Error())
+		return
+	}
+	refreshAllTabs(tab.App)
 }
 
 // ShowNewFolderDialog displays a dialog to create a new folder.
 func ShowNewFolderDialog(tab *Tab) {
+	name, ok := runEntryDialog(tab.App.Window, entryDialogSpec{
+		title:   "New Folder",
+		label:   "Folder name:",
+		initial: "New Folder",
+		confirm: "Create",
+	})
+	if !ok || name == "" {
+		return
+	}
+	if err := fileops.NewFolder(filepath.Join(tab.State.Path(), name)); err != nil {
+		showErrorDialog(tab.App.Window, "Create Folder Failed", err.Error())
+		return
+	}
+	refreshAllTabs(tab.App)
+}
+
+// entryDialogSpec describes a single-text-entry modal dialog.
+type entryDialogSpec struct {
+	title      string
+	label      string
+	initial    string
+	confirm    string
+	selectStem bool // pre-select the name without its extension
+}
+
+// runEntryDialog shows the dialog and returns the trimmed text, with
+// ok=false when the user cancelled.
+func runEntryDialog(parent *gtk.Window, spec entryDialogSpec) (string, bool) {
 	dialog, _ := gtk.DialogNewWithButtons(
-		"New Folder",
-		tab.App.Window,
+		spec.title,
+		parent,
 		gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
 		[]interface{}{"Cancel", gtk.RESPONSE_CANCEL},
-		[]interface{}{"Create", gtk.RESPONSE_OK},
+		[]interface{}{spec.confirm, gtk.RESPONSE_OK},
 	)
+	defer dialog.Destroy()
 	dialog.SetDefaultSize(350, -1)
 
-	okBtnW, err := dialog.GetWidgetForResponse(gtk.RESPONSE_OK)
-	if err == nil {
-		sc, _ := okBtnW.ToWidget().GetStyleContext()
+	// Mark the confirm button as suggested
+	if okBtn, err := dialog.GetWidgetForResponse(gtk.RESPONSE_OK); err == nil {
+		sc, _ := okBtn.ToWidget().GetStyleContext()
 		sc.AddClass("suggested-action")
 	}
 
@@ -100,12 +86,12 @@ func ShowNewFolderDialog(tab *Tab) {
 	box.SetMarginStart(12)
 	box.SetMarginEnd(12)
 
-	label, _ := gtk.LabelNew("Folder name:")
+	label, _ := gtk.LabelNew(spec.label)
 	label.SetHAlign(gtk.ALIGN_START)
 	box.PackStart(label, false, false, 0)
 
 	entry, _ := gtk.EntryNew()
-	entry.SetText("New Folder")
+	entry.SetText(spec.initial)
 	entry.SetActivatesDefault(true)
 	box.PackStart(entry, false, false, 0)
 
@@ -114,29 +100,24 @@ func ShowNewFolderDialog(tab *Tab) {
 	dialog.ShowAll()
 
 	entry.GrabFocus()
-	entry.SelectRegion(0, -1)
-
-	response := dialog.Run()
-	if response == gtk.RESPONSE_OK {
-		name, _ := entry.GetText()
-		name = strings.TrimSpace(name)
-		if name != "" {
-			newPath := filepath.Join(tab.Path, name)
-			if err := fileops.NewFolder(newPath); err != nil {
-				showErrorDialog(tab.App.Window, "Create Folder Failed", err.Error())
-			} else {
-				tab.FileView.Refresh()
-			}
-		}
+	selEnd := -1
+	if spec.selectStem {
+		selEnd = len(strings.TrimSuffix(spec.initial, filepath.Ext(spec.initial)))
 	}
-	dialog.Destroy()
+	entry.SelectRegion(0, selEnd)
+
+	if dialog.Run() != gtk.RESPONSE_OK {
+		return "", false
+	}
+	text, _ := entry.GetText()
+	return strings.TrimSpace(text), true
 }
 
-// ShowDeleteConfirmDialog asks for confirmation before deleting files.
+// ShowDeleteConfirmDialog asks for confirmation before trashing files.
 func ShowDeleteConfirmDialog(tab *Tab, paths []string) {
 	var msg string
 	if len(paths) == 1 {
-		msg = fmt.Sprintf("Move \"%s\" to the Trash?", filepath.Base(paths[0]))
+		msg = fmt.Sprintf("Move %q to the Trash?", filepath.Base(paths[0]))
 	} else {
 		msg = fmt.Sprintf("Move %d items to the Trash?", len(paths))
 	}
@@ -150,27 +131,15 @@ func ShowDeleteConfirmDialog(tab *Tab, paths []string) {
 		msg,
 	)
 	dialog.AddButton("Cancel", gtk.RESPONSE_CANCEL)
-	trashBtnW, _ := dialog.AddButton("Move to Trash", gtk.RESPONSE_OK)
-	sc, _ := trashBtnW.ToWidget().GetStyleContext()
+	trashBtn, _ := dialog.AddButton("Move to Trash", gtk.RESPONSE_OK)
+	sc, _ := trashBtn.ToWidget().GetStyleContext()
 	sc.AddClass("suggested-action")
 
 	response := dialog.Run()
 	dialog.Destroy()
 
 	if response == gtk.RESPONSE_OK {
-		n := len(paths)
-		go func() {
-			for _, p := range paths {
-				fileops.TrashFile(p)
-			}
-			glib_idle_add(func() {
-				tab.FileView.Refresh()
-				if tab.App.Statusbar != nil {
-					tab.App.Statusbar.Update(tab)
-					tab.App.Statusbar.ShowMessage(itemCountMsg(n, "moved to trash"))
-				}
-			})
-		}()
+		trashPaths(tab.App, paths)
 	}
 }
 
@@ -188,6 +157,7 @@ func ShowPropertiesDialog(tab *Tab, filePath string) {
 		gtk.DIALOG_MODAL|gtk.DIALOG_DESTROY_WITH_PARENT,
 		[]interface{}{"Close", gtk.RESPONSE_CLOSE},
 	)
+	defer dialog.Destroy()
 	dialog.SetDefaultSize(350, -1)
 
 	contentArea, _ := dialog.GetContentArea()
@@ -203,8 +173,6 @@ func ShowPropertiesDialog(tab *Tab, filePath string) {
 	addPropRow := func(key, value string) {
 		kLabel, _ := gtk.LabelNew(key)
 		kLabel.SetHAlign(gtk.ALIGN_END)
-		sc, _ := kLabel.GetStyleContext()
-		_ = sc
 		vLabel, _ := gtk.LabelNew(value)
 		vLabel.SetHAlign(gtk.ALIGN_START)
 		vLabel.SetSelectable(true)
@@ -217,8 +185,7 @@ func ShowPropertiesDialog(tab *Tab, filePath string) {
 	if info.IsDir() {
 		addPropRow("Type:", "Folder")
 	} else {
-		mime := util.DetectMimeType(info)
-		addPropRow("Type:", mime)
+		addPropRow("Type:", util.MimeFor(info.Name(), false))
 		addPropRow("Size:", util.FormatSize(info.Size()))
 	}
 	addPropRow("Location:", filepath.Dir(filePath))
@@ -228,7 +195,6 @@ func ShowPropertiesDialog(tab *Tab, filePath string) {
 	contentArea.PackStart(grid, true, true, 0)
 	dialog.ShowAll()
 	dialog.Run()
-	dialog.Destroy()
 }
 
 func showErrorDialog(parent *gtk.Window, title, message string) {

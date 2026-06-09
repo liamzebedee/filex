@@ -129,6 +129,40 @@ func TestPasteFiles_CopyDir(t *testing.T) {
 	}
 }
 
+func TestPasteFiles_DirIntoItselfIsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	dir := filepath.Join(tmp, "dir")
+	sub := filepath.Join(dir, "sub")
+	os.MkdirAll(sub, 0755)
+	os.WriteFile(filepath.Join(dir, "f.txt"), []byte("x"), 0644)
+
+	// Pasting a directory into itself (or a descendant) would recurse
+	// forever; it must be skipped without error.
+	if err := PasteFiles([]string{dir}, dir, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "dir")); !os.IsNotExist(err) {
+		t.Error("dir must not be copied into itself")
+	}
+
+	if err := PasteFiles([]string{dir}, sub, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sub, "dir")); !os.IsNotExist(err) {
+		t.Error("dir must not be copied into its own subtree")
+	}
+
+	// A sibling whose name shares a prefix is NOT a descendant.
+	sibling := filepath.Join(tmp, "dir2")
+	os.Mkdir(sibling, 0755)
+	if err := PasteFiles([]string{dir}, sibling, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(sibling, "dir", "f.txt")); err != nil {
+		t.Error("copy into a prefix-named sibling should work")
+	}
+}
+
 func TestUniquePath(t *testing.T) {
 	tmp := t.TempDir()
 

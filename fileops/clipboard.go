@@ -6,29 +6,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/gotk3/gotk3/gdk"
-	"github.com/gotk3/gotk3/gtk"
 )
 
-// CopyPathToClipboard copies file paths to the system clipboard.
-func CopyPathToClipboard(paths []string) {
-	text := strings.Join(paths, "\n")
-	clip, err := gtk.ClipboardGet(gdk.GdkAtomIntern("CLIPBOARD", false))
-	if err != nil {
-		return
-	}
-	clip.SetText(text)
-}
-
-// PasteFiles copies or moves files to a destination directory.
+// PasteFiles copies (or moves, when cut) sources into destDir. Pasting a
+// directory into itself or its own subtree is skipped — copying a tree
+// into one of its descendants would recurse forever.
 func PasteFiles(sources []string, destDir string, cut bool) error {
+	sep := string(os.PathSeparator)
 	for _, src := range sources {
-		base := filepath.Base(src)
-		dest := filepath.Join(destDir, base)
+		if src == destDir || strings.HasPrefix(destDir+sep, src+sep) {
+			continue
+		}
 
 		// Handle name collisions
-		dest = uniquePath(dest)
+		dest := uniquePath(filepath.Join(destDir, filepath.Base(src)))
 
 		if cut {
 			if err := os.Rename(src, dest); err != nil {

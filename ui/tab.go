@@ -4,16 +4,19 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/gotk3/gotk3/gdk"
 	"github.com/gotk3/gotk3/gtk"
 
+	"filex/core"
 	"filex/fileops"
 )
 
-// tabRegistry maps widget native pointers to Tab structs.
+// tabRegistry maps notebook page widgets (by native pointer) to their Tab.
 var tabRegistry = make(map[uintptr]*Tab)
 
-// Tab represents a single file browser tab.
+// Tab owns one notebook page. State is its single source of truth and
+// Entries caches the current directory listing; everything on screen is
+// rendered from those two values. Every user action funnels through
+// commit: pure state transition → reload if the location changed → Render.
 type Tab struct {
 	App      *App
 	Toolbar  *Toolbar
@@ -21,32 +24,12 @@ type Tab struct {
 	Box      *gtk.Box   // container widget added to notebook
 	TabLabel *gtk.Label // the label in the tab header
 
-	Path         string
-	History      []string
-	HistoryIndex int
-	ShowHidden   bool
-	ViewMode     ViewMode // ListMode or IconMode
-	SortColumn   int
-	SortAsc      bool
+	State   core.TabState
+	Entries []core.FileEntry
 }
 
-type ViewMode int
-
-const (
-	ListMode ViewMode = iota
-	IconMode
-)
-
 func NewTab(app *App, path string) *Tab {
-	tab := &Tab{
-		App:        app,
-		Path:       path,
-		History:    []string{path},
-		ShowHidden: false,
-		ViewMode:   ListMode,
-		SortColumn: fileops.SortByName,
-		SortAsc:    true,
-	}
+	tab := &Tab{App: app, State: core.NewTabState(path)}
 
 	var err error
 	tab.Box, err = gtk.BoxNew(gtk.ORIENTATION_VERTICAL, 0)
@@ -55,14 +38,13 @@ func NewTab(app *App, path string) *Tab {
 	}
 
 	// Per-tab toolbar: back/fwd, breadcrumb, search, view toggle
-	tab.Toolbar = NewToolbar(app)
+	tab.Toolbar = NewToolbar(tab)
 	tab.Box.PackStart(tab.Toolbar.Box, false, false, 0)
 
 	// File view
 	tab.FileView = NewFileView(tab)
 	tab.Box.PackStart(tab.FileView.ScrollWin, true, true, 0)
 
-	// Create tab label with close button
 	tabLabelBox := tab.createTabLabel()
 	tab.Box.ShowAll()
 
@@ -73,15 +55,72 @@ func NewTab(app *App, path string) *Tab {
 	// Register tab by its widget's native pointer
 	tabRegistry[tab.Box.ToWidget().Native()] = tab
 
-	tab.Navigate(path)
+	tab.Refresh()
 
 	return tab
+}
+
+// commit makes next the tab's state, loading the directory listing when
+// the location changed, and re-renders. Navigation into an unreadable
+// directory is rejected: the old state stays and the error is reported.
+func (t *Tab) commit(next core.TabState) {
+	if t.Entries == nil || next.Path() != t.State.Path() {
+		entries, err := fileops.ListDirectory(next.Path())
+		if err != nil {
+			log.Printf("filex: %v", err)
+			t.App.Statusbar.ShowMessage("Cannot open " + next.Path())
+			return
+		}
+		t.Entries = entries
+	}
+	t.State = next
+	t.Render()
+}
+
+// Refresh re-reads the current directory from disk and re-renders.
+func (t *Tab) Refresh() {
+	t.Entries = nil
+	t.commit(t.State)
+}
+
+// State transitions — thin wrappers over the pure core transitions.
+
+func (t *Tab) NavigateTo(path string)      { t.commit(t.State.Navigate(path)) }
+func (t *Tab) GoBack()                     { t.commit(t.State.Back()) }
+func (t *Tab) GoForward()                  { t.commit(t.State.Forward()) }
+func (t *Tab) GoUp()                       { t.commit(t.State.Up()) }
+func (t *Tab) ToggleHidden()               { t.commit(t.State.WithHidden(!t.State.ShowHidden)) }
+func (t *Tab) SetViewMode(m core.ViewMode) { t.commit(t.State.WithViewMode(m)) }
+func (t *Tab) SetQuery(q string)           { t.commit(t.State.WithQuery(q)) }
+func (t *Tab) SetSort(key core.SortKey)    { t.commit(t.State.WithSort(key)) }
+
+// visible derives the entries currently on screen.
+func (t *Tab) visible() []core.FileEntry {
+	return core.Visible(t.Entries, t.State)
+}
+
+// Render syncs every widget owned by the tab to the current state.
+func (t *Tab) Render() {
+	visible := t.visible()
+	t.FileView.Render(visible, t.State)
+	t.Toolbar.Render(t.State)
+	t.TabLabel.SetText(tabTitle(t.State.Path()))
+	if t.App.ActiveTab() == t {
+		t.App.Statusbar.Render(t.State.Path(), len(visible))
+	}
+}
+
+func tabTitle(path string) string {
+	if path == "/" {
+		return "/"
+	}
+	return filepath.Base(path)
 }
 
 func (t *Tab) createTabLabel() *gtk.Box {
 	box, _ := gtk.BoxNew(gtk.ORIENTATION_HORIZONTAL, 4)
 
-	t.TabLabel, _ = gtk.LabelNew(filepath.Base(t.Path))
+	t.TabLabel, _ = gtk.LabelNew(tabTitle(t.State.Path()))
 	t.TabLabel.SetWidthChars(12)
 	t.TabLabel.SetMaxWidthChars(20)
 	t.TabLabel.SetEllipsize(3) // PANGO_ELLIPSIZE_END
@@ -99,108 +138,6 @@ func (t *Tab) createTabLabel() *gtk.Box {
 	box.ShowAll()
 
 	return box
-}
-
-// updateTabLabel updates the tab label text to reflect the current directory.
-func (t *Tab) updateTabLabel() {
-	if t.TabLabel == nil {
-		return
-	}
-	name := filepath.Base(t.Path)
-	if t.Path == "/" {
-		name = "/"
-	}
-	t.TabLabel.SetText(name)
-}
-
-// Navigate changes the tab's directory and refreshes the view.
-func (t *Tab) Navigate(path string) {
-	t.setBusyCursor(true)
-	t.Path = path
-	t.FileView.Refresh()
-	t.updateTabLabel()
-	if t.Toolbar != nil {
-		t.Toolbar.UpdateForTab(t)
-	}
-	if t.App.Statusbar != nil {
-		t.App.Statusbar.Update(t)
-	}
-	t.setBusyCursor(false)
-}
-
-// setBusyCursor sets or clears the watch cursor on the window.
-func (t *Tab) setBusyCursor(busy bool) {
-	win, err := t.App.Window.GetWindow()
-	if err != nil || win == nil {
-		return
-	}
-	if busy {
-		display, err := gdk.DisplayGetDefault()
-		if err != nil {
-			return
-		}
-		cursor, err := gdk.CursorNewFromName(display, "wait")
-		if err == nil {
-			win.SetCursor(cursor)
-		}
-	} else {
-		win.SetCursor(nil)
-	}
-}
-
-// NavigateAndPush navigates and pushes to history.
-func (t *Tab) NavigateAndPush(path string) {
-	if t.HistoryIndex < len(t.History)-1 {
-		t.History = t.History[:t.HistoryIndex+1]
-	}
-	t.History = append(t.History, path)
-	t.HistoryIndex = len(t.History) - 1
-	t.Navigate(path)
-}
-
-func (t *Tab) GoBack() {
-	if t.HistoryIndex > 0 {
-		t.HistoryIndex--
-		t.Navigate(t.History[t.HistoryIndex])
-	}
-}
-
-func (t *Tab) GoForward() {
-	if t.HistoryIndex < len(t.History)-1 {
-		t.HistoryIndex++
-		t.Navigate(t.History[t.HistoryIndex])
-	}
-}
-
-func (t *Tab) GoUp() {
-	parent := filepath.Dir(t.Path)
-	if parent != t.Path {
-		t.NavigateAndPush(parent)
-	}
-}
-
-func (t *Tab) CanGoBack() bool {
-	return t.HistoryIndex > 0
-}
-
-func (t *Tab) CanGoForward() bool {
-	return t.HistoryIndex < len(t.History)-1
-}
-
-func (t *Tab) ToggleHidden() {
-	t.ShowHidden = !t.ShowHidden
-	t.FileView.Refresh()
-	if t.App.Statusbar != nil {
-		t.App.Statusbar.Update(t)
-	}
-}
-
-func (t *Tab) SetViewMode(mode ViewMode) {
-	if t.ViewMode == mode {
-		return
-	}
-	t.ViewMode = mode
-	t.FileView.SwitchView(mode)
 }
 
 func (t *Tab) Close() {
