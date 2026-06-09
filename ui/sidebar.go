@@ -171,4 +171,5 @@ func (s *Sidebar) AddBookmark(path string) {
 		UserAdded: true,
 	})
 	s.Render()
+	s.App.Statusbar.ShowMessage("Bookmarked " + filepath.Base(path))
 }

@@ -26,6 +26,7 @@ type Tab struct {
 
 	State   core.TabState
 	Entries []core.FileEntry
+	stale   bool // Entries must be re-read on the next commit
 }
 
 func NewTab(app *App, path string) *Tab {
@@ -61,17 +62,24 @@ func NewTab(app *App, path string) *Tab {
 }
 
 // commit makes next the tab's state, loading the directory listing when
-// the location changed, and re-renders. Navigation into an unreadable
-// directory is rejected: the old state stays and the error is reported.
+// the location changed or the cache is stale, and re-renders. Navigation
+// into an unreadable directory is rejected: the old state stays and the
+// error is reported. A failed re-read of the current directory keeps the
+// stale listing instead, so view-only transitions still work.
 func (t *Tab) commit(next core.TabState) {
-	if t.Entries == nil || next.Path() != t.State.Path() {
+	pathChanged := next.Path() != t.State.Path()
+	if t.stale || pathChanged {
 		entries, err := fileops.ListDirectory(next.Path())
 		if err != nil {
 			log.Printf("filex: %v", err)
 			t.App.Statusbar.ShowMessage("Cannot open " + next.Path())
-			return
+			if pathChanged {
+				return
+			}
+		} else {
+			t.Entries = entries
 		}
-		t.Entries = entries
+		t.stale = false
 	}
 	t.State = next
 	t.Render()
@@ -79,13 +87,22 @@ func (t *Tab) commit(next core.TabState) {
 
 // Refresh re-reads the current directory from disk and re-renders.
 func (t *Tab) Refresh() {
-	t.Entries = nil
+	t.stale = true
 	t.commit(t.State)
 }
 
 // State transitions — thin wrappers over the pure core transitions.
 
-func (t *Tab) NavigateTo(path string)      { t.commit(t.State.Navigate(path)) }
+// NavigateTo pushes a new location; re-navigating to the current path
+// re-reads it instead (clicking the active breadcrumb or bookmark acts as
+// a refresh).
+func (t *Tab) NavigateTo(path string) {
+	if path == t.State.Path() {
+		t.Refresh()
+		return
+	}
+	t.commit(t.State.Navigate(path))
+}
 func (t *Tab) GoBack()                     { t.commit(t.State.Back()) }
 func (t *Tab) GoForward()                  { t.commit(t.State.Forward()) }
 func (t *Tab) GoUp()                       { t.commit(t.State.Up()) }

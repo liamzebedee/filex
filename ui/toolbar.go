@@ -128,6 +128,13 @@ func NewToolbar(tab *Tab) *Toolbar {
 		query, _ := tb.SearchEntry.GetText()
 		tab.SetQuery(query)
 	})
+	tb.SearchEntry.Connect("key-press-event", func(e *gtk.SearchEntry, event *gdk.Event) bool {
+		if gdk.EventKeyNewFromEvent(event).KeyVal() == gdk.KEY_Escape {
+			tab.SetQuery("") // Render clears the entry text
+			return true
+		}
+		return false
+	})
 	tb.Box.PackStart(tb.SearchEntry, false, false, 0)
 
 	// View toggle

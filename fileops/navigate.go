@@ -25,12 +25,21 @@ func ListDirectory(dirPath string) ([]core.FileEntry, error) {
 		if err != nil {
 			continue
 		}
+		path := filepath.Join(dirPath, e.Name())
+		isDir := info.IsDir()
+		if info.Mode()&os.ModeSymlink != 0 {
+			// A symlink to a directory should behave like a directory
+			// (navigate into it rather than "open" it).
+			if target, err := os.Stat(path); err == nil {
+				isDir = target.IsDir()
+			}
+		}
 		result = append(result, core.FileEntry{
 			Name:    e.Name(),
-			Path:    filepath.Join(dirPath, e.Name()),
+			Path:    path,
 			Size:    info.Size(),
 			ModTime: info.ModTime().Unix(),
-			IsDir:   info.IsDir(),
+			IsDir:   isDir,
 			Mode:    info.Mode(),
 		})
 	}

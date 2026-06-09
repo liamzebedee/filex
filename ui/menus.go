@@ -61,6 +61,19 @@ func ShowContextMenu(tab *Tab, event *gdk.EventButton) {
 		menu.Append(termItem)
 	}
 
+	// Add Bookmark (selected folder, or the current directory)
+	if isDir || !hasSelection {
+		bookmarkItem := menuItem("Add Bookmark", "bookmark-new")
+		bookmarkItem.Connect("activate", func() {
+			dir := tab.State.Path()
+			if isDir {
+				dir = selectedPath
+			}
+			app.Sidebar.AddBookmark(dir)
+		})
+		menu.Append(bookmarkItem)
+	}
+
 	addSeparator(menu)
 
 	// New Folder

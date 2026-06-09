@@ -19,10 +19,11 @@ import (
 // display strings only, and reads go through entryAt into the rendered
 // slice instead.
 const (
-	colIcon = iota // icon name
+	colIcon = iota // icon name (list view)
 	colName
-	colSize // formatted
-	colDate // formatted
+	colSize   // formatted
+	colDate   // formatted
+	colPixbuf // icon/thumbnail pixbuf (icon view)
 )
 
 // globalDragPaths holds paths being dragged across any FileView. It is
@@ -58,10 +59,11 @@ func NewFileView(tab *Tab) *FileView {
 	fv.ScrollWin.SetPolicy(gtk.POLICY_AUTOMATIC, gtk.POLICY_AUTOMATIC)
 
 	fv.Store, err = gtk.ListStoreNew(
-		glib.TYPE_STRING, // icon name
-		glib.TYPE_STRING, // name
-		glib.TYPE_STRING, // size (formatted)
-		glib.TYPE_STRING, // date (formatted)
+		glib.TYPE_STRING,    // icon name
+		glib.TYPE_STRING,    // name
+		glib.TYPE_STRING,    // size (formatted)
+		glib.TYPE_STRING,    // date (formatted)
+		gdk.PixbufGetType(), // icon/thumbnail pixbuf
 	)
 	if err != nil {
 		log.Fatal(err)
@@ -116,12 +118,14 @@ func (fv *FileView) Render(visible []core.FileEntry, s core.TabState) {
 // writer; nothing ever reads the store back.
 func (fv *FileView) populateStore(entries []core.FileEntry) {
 	fv.Store.Clear()
+	thumbBudget := thumbsPerRender
 	for _, e := range entries {
 		sizeStr := ""
 		if !e.IsDir {
 			sizeStr = util.FormatSize(e.Size)
 		}
-		fv.Store.Set(fv.Store.Append(),
+		iter := fv.Store.Append()
+		fv.Store.Set(iter,
 			[]int{colIcon, colName, colSize, colDate},
 			[]interface{}{
 				util.IconForMime(util.MimeFor(e.Name, e.IsDir)),
@@ -130,6 +134,9 @@ func (fv *FileView) populateStore(entries []core.FileEntry) {
 				util.FormatDate(time.Unix(e.ModTime, 0)),
 			},
 		)
+		if pb := gridPixbufFor(e, &thumbBudget); pb != nil {
+			fv.Store.SetValue(iter, colPixbuf, pb)
+		}
 	}
 }
 
@@ -269,6 +276,7 @@ func (fv *FileView) buildIconView() {
 		log.Fatal(err)
 	}
 	fv.IconView.SetTextColumn(colName)
+	fv.IconView.SetPixbufColumn(colPixbuf)
 	fv.IconView.SetSelectionMode(gtk.SELECTION_MULTIPLE)
 	fv.IconView.SetItemWidth(80)
 	fv.IconView.SetColumnSpacing(8)
@@ -325,8 +333,14 @@ func (fv *FileView) buildIconView() {
 }
 
 // dropDragged moves the dragged paths into destDir, skipping paths already
-// there, and clears the drag state.
+// there, and clears the drag state. It returns true whenever drag data was
+// present — even if nothing needed moving — so the drop never falls
+// through to GTK's default model-row drop, which would reorder the store
+// behind our back.
 func (fv *FileView) dropDragged(destDir string) bool {
+	if len(globalDragPaths) == 0 {
+		return false
+	}
 	sources := make([]string, 0, len(globalDragPaths))
 	for _, p := range globalDragPaths {
 		if filepath.Dir(p) != destDir {
@@ -334,12 +348,11 @@ func (fv *FileView) dropDragged(destDir string) bool {
 		}
 	}
 	globalDragPaths = nil
-	if len(sources) == 0 {
-		return false
+	if len(sources) > 0 {
+		runFileOp(fv.Tab.App, itemCountMsg(len(sources), "moved"), func() error {
+			return fileops.PasteFiles(sources, destDir, true)
+		})
 	}
-	runFileOp(fv.Tab.App, itemCountMsg(len(sources), "moved"), func() error {
-		return fileops.PasteFiles(sources, destDir, true)
-	})
 	return true
 }
 
@@ -398,10 +411,20 @@ func (fv *FileView) SelectAll() {
 	}
 }
 
-// OpenSelected activates the single selected item (opens folder or file).
-func (fv *FileView) OpenSelected() {
+// OpenSelected activates the single selected item (opens folder or file)
+// and reports whether it did; with no or multiple selection it declines so
+// the key event can fall through to the focused widget's own handling.
+func (fv *FileView) OpenSelected() bool {
 	items := fv.selectedItems()
-	if len(items) == 1 {
-		fv.activateRow(items[0])
+	if len(items) != 1 {
+		return false
 	}
+	fv.activateRow(items[0])
+	return true
+}
+
+// HasFocus reports whether one of the file view widgets has keyboard
+// focus.
+func (fv *FileView) HasFocus() bool {
+	return fv.TreeView.ToWidget().HasFocus() || fv.IconView.ToWidget().HasFocus()
 }

@@ -134,6 +134,7 @@ func ShowDeleteConfirmDialog(tab *Tab, paths []string) {
 	trashBtn, _ := dialog.AddButton("Move to Trash", gtk.RESPONSE_OK)
 	sc, _ := trashBtn.ToWidget().GetStyleContext()
 	sc.AddClass("suggested-action")
+	dialog.SetDefaultResponse(gtk.RESPONSE_OK)
 
 	response := dialog.Run()
 	dialog.Destroy()

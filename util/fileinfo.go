@@ -54,6 +54,19 @@ func MimeFor(name string, isDir bool) string {
 	return "application/octet-stream"
 }
 
+// IsTextMime reports whether a mime type is readable as plain text.
+func IsTextMime(mime string) bool {
+	if strings.HasPrefix(mime, "text/") {
+		return true
+	}
+	switch mime {
+	case "application/json", "application/xml", "application/yaml",
+		"application/toml", "application/x-shellscript":
+		return true
+	}
+	return false
+}
+
 var extMime = map[string]string{
 	".txt":  "text/plain",
 	".md":   "text/markdown",
